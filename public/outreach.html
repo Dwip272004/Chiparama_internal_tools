@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chiparama Outreach Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#E7E3D8;
+    --panel:#F1EEE4;
+    --border:#C9C3AF;
+    --text:#23261F;
+    --text-dim:#6E6A5B;
+    --text-faint:#9A947F;
+    --teal-bg:rgba(43,110,99,0.1);
+    --teal:#1D4B43;
+    --amber:#B9822F;
+    --amber-bg:rgba(185,130,47,0.12);
+    --red:#9C4A3A;
+    --red-bg:rgba(156,74,58,0.1);
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    min-height:100vh;
+    padding:40px 28px 60px;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+
+  .header{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    border-bottom:2px solid var(--text); padding-bottom:18px; margin-bottom:26px;
+    flex-wrap:wrap; gap:14px;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em;
+    color:var(--text-dim); text-transform:uppercase; margin-bottom:8px;
+  }
+  h1{
+    font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:36px;
+    margin:0; color:var(--text); letter-spacing:-0.01em;
+  }
+  .header-meta{ text-align:right; }
+  .header-meta .runs{ font-size:12.5px; color:var(--text-dim); margin-bottom:6px; }
+  .header-meta .runs b{ color:var(--text); font-weight:600; }
+  .live-pill{
+    display:inline-flex; align-items:center; gap:6px; font-family:'IBM Plex Mono',monospace;
+    font-size:11px; letter-spacing:.08em; color:var(--teal); background:var(--teal-bg);
+    padding:4px 10px; border-radius:20px;
+  }
+  .dot{ width:6px;height:6px;border-radius:50%; background:var(--teal); animation:pulse 2.2s infinite; }
+  @keyframes pulse{ 0%{opacity:1;} 50%{opacity:.35;} 100%{opacity:1;} }
+  .updated{ font-size:11px; color:var(--text-faint); margin-top:6px; font-family:'IBM Plex Mono',monospace; }
+
+  .banner{
+    display:none; margin-bottom:20px; padding:11px 16px; border:1px solid var(--red);
+    background:var(--red-bg); color:var(--red); font-size:13px; border-radius:var(--radius);
+  }
+
+  section.panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px 24px; margin-bottom:18px;
+  }
+  section.panel h2{
+    font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:18px;
+    margin:0 0 2px 0; color:var(--text);
+  }
+  .panel-sub{ font-size:12.5px; color:var(--text-dim); margin-bottom:16px; }
+
+  .kpi-row{ display:grid; grid-template-columns:repeat(4,1fr); text-align:center; }
+  .kpi{ padding:2px 10px; }
+  .kpi .val{ font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:34px; line-height:1; }
+  .kpi .lbl{ font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-dim); margin-top:8px; }
+  .kpi + .kpi{ border-left:1px dashed var(--border); }
+
+  .job-row{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    padding:12px 0; border-top:1px dashed var(--border);
+  }
+  .job-row:first-of-type{ border-top:none; padding-top:4px; }
+  .job-name{ font-size:14px; color:var(--text); font-weight:500; }
+  .job-badges{ display:flex; align-items:center; gap:10px; white-space:nowrap; }
+  .pill{ font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:2px 8px; border-radius:9px; }
+  .pill.sends{ background:var(--teal-bg); color:var(--teal); }
+  .pill.reply-hi{ background:var(--amber-bg); color:var(--amber); }
+  .pill.reply-lo{ color:var(--text-faint); }
+
+  .table-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
+  input#sendsFilter{
+    background:#fff; border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace;
+    font-size:12px; padding:7px 10px; border-radius:var(--radius); min-width:230px; outline:none;
+  }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  thead th{
+    text-align:left; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-faint);
+    font-weight:600; padding:0 10px 10px 0; border-bottom:1px solid var(--border);
+  }
+  tbody td{ padding:9px 10px 9px 0; border-bottom:1px dashed var(--border); vertical-align:middle; }
+  tbody tr:last-child td{ border-bottom:none; }
+  td.role{ color:var(--text-dim); max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  td.sent{ font-family:'IBM Plex Mono',monospace; color:var(--text-faint); white-space:nowrap; font-size:12px; }
+  .empty-note{ color:var(--text-faint); font-size:13px; padding:14px 0; }
+  .table-foot{ margin-top:10px; font-size:11px; color:var(--text-faint); font-family:'IBM Plex Mono',monospace; }
+
+  .footer{
+    display:flex; align-items:center; justify-content:space-between; font-size:11.5px;
+    color:var(--text-faint); font-family:'IBM Plex Mono',monospace; margin-top:6px; flex-wrap:wrap; gap:8px;
+  }
+
+  @media (max-width:720px){
+    .kpi-row{ grid-template-columns:repeat(2,1fr); row-gap:18px; }
+    .kpi + .kpi{ border-left:none; }
+    .header{ flex-direction:column; align-items:flex-start; }
+    .header-meta{ text-align:left; }
+  }
+
+  /* ---------- Suite nav ---------- */
+  .suite-nav{
+    display:flex; gap:8px; margin-bottom: 22px; flex-wrap:wrap;
+  }
+  .suite-tab{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-dim);
+    text-decoration: none;
+    background: var(--panel);
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .suite-tab:hover{ color: var(--text); border-color: var(--teal); }
+  .suite-tab.active{ background: var(--text); color: var(--panel); border-color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="suite-nav">
+    <a class="suite-tab" href="/">Sourcing Desk</a>
+    <a class="suite-tab active" href="/outreach.html">Outreach Control</a>
+    <a class="suite-tab" href="/leads.html">Leads Dashboard</a>
+  </nav>
+
+  <div class="header">
+    <div>
+      <div class="eyebrow">Candidate Outreach / Leadership View</div>
+      <h1>Chiparama Outreach Control</h1>
+    </div>
+    <div class="header-meta">
+      <div class="runs">Runs via <b>n8n</b> · <b>RecruitCRM</b> · <b>Outlook</b></div>
+      <div class="live-pill"><span class="dot"></span>LIVE</div>
+      <div class="updated" id="updatedAt">loading…</div>
+    </div>
+  </div>
+
+  <div class="banner" id="banner"></div>
+
+  <section class="panel">
+    <div class="kpi-row" id="kpiRow">
+      <div class="kpi"><div class="val mono" id="kpiJobs">—</div><div class="lbl">Jobs With Outreach</div></div>
+      <div class="kpi"><div class="val mono" id="kpiToday">—</div><div class="lbl">Sent Today</div></div>
+      <div class="kpi"><div class="val mono" id="kpiTotal">—</div><div class="lbl">Total Sends Logged</div></div>
+      <div class="kpi"><div class="val mono" id="kpiReply">—</div><div class="lbl">Reply Rate</div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Outreach by Job</h2>
+    <div class="panel-sub">Send volume and reply rate per job, pulled live from the Outreach Log</div>
+    <div id="jobList"></div>
+  </section>
+
+  <section class="panel">
+    <div class="table-head">
+      <div>
+        <h2 style="margin-bottom:2px;">Recent Sends</h2>
+        <div class="panel-sub" style="margin-bottom:0;" id="sendsCount"></div>
+      </div>
+      <input id="sendsFilter" type="text" placeholder="Filter by email or job…">
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Candidate</th>
+          <th>Job</th>
+          <th>Sent</th>
+          <th>Replied</th>
+        </tr>
+      </thead>
+      <tbody id="sendsBody"></tbody>
+    </table>
+    <div class="empty-note" id="sendsEmpty" style="display:none;">No sends match that filter.</div>
+    <div class="table-foot" id="sendsFoot"></div>
+  </section>
+
+  <div class="footer">
+    <span id="healthText">Checking system status…</span>
+    <span>Refresh interval: 90s</span>
+  </div>
+
+</div>
+
+<script>
+const API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-dashboard-metrics";
+const REFRESH_MS = 90000;
+
+function fmtNum(n){ return (n ?? 0).toLocaleString(); }
+function fmtTime(d){ return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+function fmtDate(v){
+  if(!v) return '—';
+  const dt = new Date(v);
+  if(isNaN(dt)) return String(v);
+  return dt.toLocaleDateString([], {month:'short', day:'numeric'}) + ' · ' + dt.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function loadDashboard(){
+  const banner = document.getElementById('banner');
+  try{
+    const res = await fetch(API_URL, { cache:'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    banner.style.display = 'none';
+    render(data);
+    document.getElementById('healthText').textContent = 'Metrics API responding normally';
+  }catch(err){
+    banner.style.display = 'block';
+    banner.textContent = 'Live data unavailable right now (' + err.message + '). Will retry automatically.';
+    document.getElementById('healthText').textContent = 'Metrics API unreachable — retrying';
+  }
+}
+
+function render(data){
+  const now = new Date();
+  document.getElementById('updatedAt').textContent = 'Updated ' + fmtTime(now);
+
+  const log = Array.isArray(data.outreachLog) ? data.outreachLog : [];
+  const byJob = Array.isArray(data.byJob) ? data.byJob : [];
+
+  document.getElementById('kpiJobs').textContent = fmtNum(byJob.length);
+  document.getElementById('kpiTotal').textContent = fmtNum(data.outreachLogTotal ?? log.length);
+
+  const todayStr = now.toISOString().slice(0,10);
+  const sentToday = log.filter(r => r.sentAt && String(r.sentAt).slice(0,10) === todayStr).length;
+  document.getElementById('kpiToday').textContent = fmtNum(sentToday);
+
+  const knownReplies = log.filter(r => typeof r.replied === 'boolean');
+  const repliedCount = knownReplies.filter(r => r.replied).length;
+  document.getElementById('kpiReply').textContent = knownReplies.length
+    ? ((repliedCount / knownReplies.length) * 100).toFixed(1) + '%'
+    : '—';
+
+  const jobList = document.getElementById('jobList');
+  jobList.innerHTML = byJob.length ? byJob.map(j => {
+    const replyClass = j.replyRate >= 15 ? 'reply-hi' : 'reply-lo';
+    return `
+      <div class="job-row">
+        <div class="job-name">${escapeHtml(j.job)}</div>
+        <div class="job-badges">
+          <span class="pill sends">${fmtNum(j.sends)} sent</span>
+          <span class="pill ${replyClass}">${j.replyRate}% replied</span>
+        </div>
+      </div>`;
+  }).join('') : '<div class="empty-note">No job-tagged sends yet.</div>';
+
+  window.__sendsLog = log.slice().sort((a,b) => new Date(b.sentAt||0) - new Date(a.sentAt||0));
+  renderSendsTable();
+}
+
+function renderSendsTable(){
+  const all = window.__sendsLog || [];
+  const q = (document.getElementById('sendsFilter').value || '').toLowerCase().trim();
+  const filtered = q ? all.filter(r =>
+    (r.candidateEmail||'').toLowerCase().includes(q) || (r.targetRole||'').toLowerCase().includes(q)
+  ) : all;
+
+  document.getElementById('sendsCount').textContent = fmtNum(all.length) + ' total sends logged';
+  const LIMIT = 50;
+  const shown = filtered.slice(0, LIMIT);
+  const body = document.getElementById('sendsBody');
+  const emptyMsg = document.getElementById('sendsEmpty');
+
+  if(shown.length === 0){
+    body.innerHTML = '';
+    emptyMsg.style.display = 'block';
+  }else{
+    emptyMsg.style.display = 'none';
+    body.innerHTML = shown.map(r => `
+      <tr>
+        <td>${escapeHtml(r.candidateEmail || '—')}</td>
+        <td class="role" title="${escapeHtml(r.targetRole||'')}">${escapeHtml(r.targetRole || 'Unspecified')}</td>
+        <td class="sent">${fmtDate(r.sentAt)}</td>
+        <td>${r.replied ? '<span class="pill reply-hi">Replied</span>' : '<span class="pill reply-lo">No reply</span>'}</td>
+      </tr>
+    `).join('');
+  }
+
+  document.getElementById('sendsFoot').textContent =
+    filtered.length > LIMIT ? `Showing latest ${LIMIT} of ${filtered.length} matching sends` : `Showing ${filtered.length} send${filtered.length===1?'':'s'}`;
+}
+
+document.getElementById('sendsFilter').addEventListener('input', renderSendsTable);
+loadDashboard();
+setInterval(loadDashboard, REFRESH_MS);
+</script>
+</body>
+</html>
