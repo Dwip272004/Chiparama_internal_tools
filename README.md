@@ -46,6 +46,27 @@ The API key never reaches the browser. The frontend only ever calls your own
 | `SHEET_ID` | `1Jss-cmGXu_8jMzplRZYJgYxPCkOncP0vTbbDwYEci7w` (default, already set) |
 | `SEARCH_REQUESTS_TAB` | `Search Requests` (default, already set) |
 | `CANDIDATES_TAB` | `Candidates` (default, already set) |
+| `SUPABASE_URL` | `https://ewbpejxknkagwxhceavx.supabase.co` (default, already set) |
+| `SUPABASE_ANON_KEY` | the "Chiparama Sourcing Desk" project's publishable key (default, already set) |
+
+## Login / team access
+
+The whole suite (every page and every `/api/*` route except `/api/auth/*`
+itself) sits behind a Supabase-authenticated session. There is no self-serve
+sign-up page:
+
+1. In the [Supabase dashboard](https://supabase.com/dashboard/project/ewbpejxknkagwxhceavx) →
+   **Authentication → Users → Add user**, create an account for each team
+   member (email + password; "Auto Confirm User" so they don't need to click
+   an email link).
+2. They sign in at `/login.html`. The server exchanges their credentials for
+   a Supabase session and stores it as httpOnly cookies — the browser never
+   sees the Supabase session or API keys directly.
+3. Sessions refresh silently in the background; "Sign out" (top right of
+   every page) clears the cookies.
+
+To remove someone's access, delete or disable their user in the same
+Supabase **Authentication → Users** screen.
 
 ## Deploying on Render
 

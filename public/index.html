@@ -506,6 +506,8 @@
   }
   .suite-tab:hover{ color: var(--ink); border-color: var(--teal); }
   .suite-tab.active{ background: var(--ink); color: var(--paper-raised); border-color: var(--ink); }
+  .suite-tab.signout{ margin-left: auto; background: none; cursor: pointer; }
+  .suite-tab.signout:hover{ color: var(--rust); border-color: var(--rust); }
 </style>
 </head>
 <body>
@@ -515,6 +517,7 @@
     <a class="suite-tab active" href="/">Sourcing Desk</a>
     <a class="suite-tab" href="/outreach.html">Outreach Control</a>
     <a class="suite-tab" href="/leads.html">Leads Dashboard</a>
+    <button type="button" class="suite-tab signout" id="signOutBtn">Sign out</button>
   </nav>
 
   <header class="masthead">
@@ -1213,6 +1216,11 @@
       submitBtn.disabled = false;
       submitBtn.textContent = "Run search";
     });
+  });
+
+  $("signOutBtn").addEventListener("click", async () => {
+    try{ await fetch("/api/auth/logout", { method: "POST" }); } catch(err){ /* ignore, redirect anyway */ }
+    window.location.href = "/login.html";
   });
 })();
 </script>

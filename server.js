@@ -1,11 +1,13 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import cookieParser from "cookie-parser";
+import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(cookieParser());
 
 const {
   N8N_BASE_URL,                                        // e.g. https://diwp645.app.n8n.cloud  (no trailing slash)
@@ -16,12 +18,119 @@ const {
   SHEET_ID = "1Jss-cmGXu_8jMzplRZYJgYxPCkOncP0vTbbDwYEci7w", // the Candidates sourcing Google Sheet
   SEARCH_REQUESTS_TAB = "Search Requests",
   CANDIDATES_TAB = "Candidates",
+  SUPABASE_URL = "https://ewbpejxknkagwxhceavx.supabase.co",   // "Chiparama Sourcing Desk" project
+  SUPABASE_ANON_KEY = "sb_publishable_MPL4a2rIFziptvf1k8WN9Q_WUwarTxm", // publishable key -- safe to default, not a secret
   PORT = 3000
 } = process.env;
 
 if (!N8N_BASE_URL || !N8N_API_KEY) {
   console.warn("[sourcing-desk] Missing N8N_BASE_URL or N8N_API_KEY env vars — set these on Render.");
 }
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/**
+ * Team members are added directly in the Supabase dashboard (Authentication
+ * > Users) -- there's no self-serve sign-up page here on purpose. The
+ * browser never touches Supabase directly either: login goes through our
+ * own /api/auth/login, which mediates the session as httpOnly cookies, so
+ * every page and every other /api/* route can be gated the same simple way.
+ */
+const AUTH_COOKIE = "sb-access-token";
+const REFRESH_COOKIE = "sb-refresh-token";
+
+function setAuthCookies(res, session) {
+  const isProd = process.env.NODE_ENV === "production";
+  res.cookie(AUTH_COOKIE, session.access_token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+    maxAge: (session.expires_in || 3600) * 1000
+  });
+  res.cookie(REFRESH_COOKIE, session.refresh_token, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: "lax",
+    maxAge: 30 * 24 * 60 * 60 * 1000
+  });
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie(AUTH_COOKIE);
+  res.clearCookie(REFRESH_COOKIE);
+}
+
+function denyAuth(req, res) {
+  if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Not authenticated." });
+  return res.redirect("/login.html");
+}
+
+async function requireAuth(req, res, next) {
+  const token = req.cookies[AUTH_COOKIE];
+  if (token) {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (data && data.user && !error) {
+      req.user = data.user;
+      return next();
+    }
+  }
+
+  // Access token missing or expired -- try the longer-lived refresh token
+  // before giving up, so a session doesn't die every hour.
+  const refreshToken = req.cookies[REFRESH_COOKIE];
+  if (refreshToken) {
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: refreshToken });
+    if (!error && data && data.session) {
+      setAuthCookies(res, data.session);
+      req.user = data.session.user;
+      return next();
+    }
+  }
+
+  clearAuthCookies(res);
+  return denyAuth(req, res);
+}
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data.session) {
+      return res.status(401).json({ error: error?.message || "Invalid email or password." });
+    }
+
+    setAuthCookies(res, data.session);
+    res.json({ ok: true, email: data.user?.email || email });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  clearAuthCookies(res);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/session", async (req, res) => {
+  const token = req.cookies[AUTH_COOKIE];
+  if (!token) return res.status(401).json({ error: "Not authenticated." });
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data.user) return res.status(401).json({ error: "Not authenticated." });
+  res.json({ email: data.user.email });
+});
+
+// Gate every page and every other /api/* route behind a valid Supabase
+// session -- only the login page and the auth endpoints themselves stay open.
+app.use((req, res, next) => {
+  if (req.path === "/login.html" || req.path.startsWith("/api/auth/")) return next();
+  return requireAuth(req, res, next);
+});
+
+app.use(express.static(path.join(__dirname, "public")));
 
 function n8nHeaders() {
   return { "X-N8N-API-KEY": N8N_API_KEY, accept: "application/json" };

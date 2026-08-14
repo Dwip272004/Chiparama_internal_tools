@@ -138,6 +138,8 @@
   }
   .suite-tab:hover{ color: var(--text); border-color: var(--teal); }
   .suite-tab.active{ background: var(--text); color: var(--panel); border-color: var(--text); }
+  .suite-tab.signout{ margin-left: auto; background: none; cursor: pointer; }
+  .suite-tab.signout:hover{ color: var(--red); border-color: var(--red); }
 </style>
 </head>
 <body>
@@ -147,6 +149,7 @@
     <a class="suite-tab" href="/">Sourcing Desk</a>
     <a class="suite-tab active" href="/outreach.html">Outreach Control</a>
     <a class="suite-tab" href="/leads.html">Leads Dashboard</a>
+    <button type="button" class="suite-tab signout" id="signOutBtn">Sign out</button>
   </nav>
 
   <div class="header">
@@ -312,6 +315,11 @@ function renderSendsTable(){
 document.getElementById('sendsFilter').addEventListener('input', renderSendsTable);
 loadDashboard();
 setInterval(loadDashboard, REFRESH_MS);
+
+document.getElementById('signOutBtn').addEventListener('click', async () => {
+  try{ await fetch('/api/auth/logout', { method: 'POST' }); } catch(err){ /* ignore, redirect anyway */ }
+  window.location.href = '/login.html';
+});
 </script>
 </body>
 </html>
