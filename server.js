@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
+import { randomUUID } from "crypto";
 import cookieParser from "cookie-parser";
 import { createClient } from "@supabase/supabase-js";
 
@@ -20,6 +21,22 @@ const {
   CANDIDATES_TAB = "Candidates",
   SUPABASE_URL = "https://ewbpejxknkagwxhceavx.supabase.co",   // "Chiparama Sourcing Desk" project
   SUPABASE_ANON_KEY = "sb_publishable_MPL4a2rIFziptvf1k8WN9Q_WUwarTxm", // publishable key -- safe to default, not a secret
+
+  // ---- Credit system: every threshold below is a config value, meant to be
+  // tuned (raised, mostly) once real usage has been watched for a while
+  // without LinkedIn flagging or Apollo/Seamless overspend. See
+  // credit_system migration in Supabase for where these are actually used.
+  SOURCING_CREDIT_MAX = "3",
+  SOURCING_CREDIT_REGEN_MS = String(5 * 60 * 60 * 1000),   // 5h rolling regen
+  EMAIL_CREDIT_MAX = "150",
+  EMAIL_CREDIT_REGEN_MS = String(5 * 60 * 60 * 1000),      // 5h rolling regen
+  TEAM_MAX_SEARCHES_PER_DAY = "40",
+  TEAM_MAX_SEARCHES_PER_WINDOW = "12",
+  TEAM_WINDOW_MS = String(5 * 60 * 60 * 1000),              // 5h pacing window
+  TEAM_DAY_MS = String(24 * 60 * 60 * 1000),
+  TEAM_MAX_CANDIDATES_PER_DAY = "600",
+  DEDUPE_COOLDOWN_MS = String(6 * 60 * 60 * 1000),          // re-running the same search string within 6h is blocked
+
   PORT = 3000
 } = process.env;
 
@@ -28,6 +45,15 @@ if (!N8N_BASE_URL || !N8N_API_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// A fresh client scoped to one user's access token, so Postgres RLS and
+// auth.uid() inside the credit RPC functions resolve to that specific user
+// -- the shared `supabase` client above (anon key only) can't do that.
+function userClient(token) {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+}
 
 /**
  * Team members are added directly in the Supabase dashboard (Authentication
@@ -71,6 +97,7 @@ async function requireAuth(req, res, next) {
     const { data, error } = await supabase.auth.getUser(token);
     if (data && data.user && !error) {
       req.user = data.user;
+      req.supabaseToken = token; // lets routes build a user-scoped client for the credit RPCs
       return next();
     }
   }
@@ -83,6 +110,7 @@ async function requireAuth(req, res, next) {
     if (!error && data && data.session) {
       setAuthCookies(res, data.session);
       req.user = data.session.user;
+      req.supabaseToken = data.session.access_token;
       return next();
     }
   }
@@ -136,6 +164,69 @@ function n8nHeaders() {
   return { "X-N8N-API-KEY": N8N_API_KEY, accept: "application/json" };
 }
 
+// ---- Credit system helpers ----
+
+// Tracks an email-credit reservation from /api/submit through to the
+// reconcile step in /api/results/:id. Keyed by our own requestId (not n8n's
+// executionId, which isn't known yet at submit time) -- single Node process,
+// so an in-memory Map is enough for this scale. Swept below so an abandoned
+// reservation (client never loads results) doesn't strand credits forever.
+const pendingReservations = new Map(); // requestId -> { token, emailBudget, createdAt, reconciled }
+
+setInterval(() => {
+  const staleBefore = Date.now() - 15 * 60 * 1000;
+  for (const [id, r] of pendingReservations) {
+    if (!r.reconciled && r.createdAt < staleBefore) {
+      userClient(r.token).rpc("refund_email_credits", {
+        amount: r.emailBudget,
+        p_max: Number(EMAIL_CREDIT_MAX),
+        p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
+      }).then(() => pendingReservations.delete(id))
+        .catch(() => {}); // best-effort -- regen will eventually cover it anyway
+    }
+  }
+}, 5 * 60 * 1000).unref();
+
+function normalizeSearchString(s) {
+  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Checks the Candidates sheet for a search with the same (normalized)
+ * boolean string sourced within the cooldown window -- by anyone on the
+ * team, not just the current user. Reuses the same sheet read the history
+ * panel already does rather than a new table. Best-effort: if the sheet
+ * read fails, we don't block submission on it (mirrors the existing
+ * best-effort pattern for the Search Requests tab below).
+ */
+async function findRecentDuplicateSearch(normalizedString, cooldownMs) {
+  try {
+    const candidates = await fetchSheetRows(CANDIDATES_TAB);
+    const cutoff = Date.now() - cooldownMs;
+    let best = null;
+    for (const c of candidates) {
+      const key = normalizeSearchString(c["Search Keywords"]);
+      if (key !== normalizedString) continue;
+      const sourcedAt = c["Sourced At"] ? new Date(c["Sourced At"]).getTime() : null;
+      if (!sourcedAt || sourcedAt < cutoff) continue;
+      if (!best || sourcedAt > best.sourcedAt) best = { sourcedAt, searchString: c["Search Keywords"] };
+    }
+    if (!best) return null;
+
+    const count = candidates.filter((c) => normalizeSearchString(c["Search Keywords"]) === normalizedString).length;
+    return { searchString: best.searchString, count, sourcedAt: best.sourcedAt };
+  } catch {
+    return null; // sheet read failed -- don't block on a best-effort check
+  }
+}
+
+function minutesUntil(iso) {
+  if (!iso) return "a while";
+  const mins = Math.max(1, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
 // TEMP DEBUG endpoint: confirms whether the browser's fetch to our own
 // server is arriving with complete field data.
 app.post("/api/debug-echo", (req, res) => {
@@ -162,6 +253,76 @@ app.post("/api/submit", async (req, res) => {
       return res.status(400).json({ error: "Boolean search string and location are required." });
     }
 
+    const userSupabase = userClient(req.supabaseToken);
+
+    // ---- Credit system gates, cheapest/most-common rejection first ----
+
+    // 1. Genuine counts: block re-running an identical search too soon --
+    // it'd just re-hit LinkedIn for results we already have and pad stats.
+    const normalized = normalizeSearchString(fields.booleanSearchString);
+    const dup = await findRecentDuplicateSearch(normalized, Number(DEDUPE_COOLDOWN_MS));
+    if (dup) {
+      return res.status(409).json({
+        code: "duplicate_search",
+        error: `This exact search already pooled ${dup.count} candidate${dup.count === 1 ? "" : "s"} ${minutesUntil(new Date(dup.sourcedAt + Number(DEDUPE_COOLDOWN_MS)).toISOString())} ago or more recently — reuse it from the Sourcing history panel instead of re-running it.`
+      });
+    }
+
+    // 2. Team-wide hard ceiling -- independent of personal balance, since
+    // the whole team shares one LinkedIn seat.
+    const { data: teamData, error: teamErr } = await userSupabase.rpc("check_and_record_team_search", {
+      p_max_per_day: Number(TEAM_MAX_SEARCHES_PER_DAY),
+      p_max_per_window: Number(TEAM_MAX_SEARCHES_PER_WINDOW),
+      p_window_ms: Number(TEAM_WINDOW_MS),
+      p_day_ms: Number(TEAM_DAY_MS),
+      p_max_candidates_per_day: Number(TEAM_MAX_CANDIDATES_PER_DAY)
+    });
+    if (teamErr) return res.status(500).json({ error: teamErr.message });
+    const teamRow = teamData && teamData[0];
+    if (!teamRow || !teamRow.allowed) {
+      return res.status(429).json({
+        code: "team_limit",
+        error: `Team-wide LinkedIn usage limit reached for now (${teamRow ? teamRow.reason : "unknown"}) — resets ${teamRow ? new Date(teamRow.resets_at).toLocaleString() : "soon"}.`,
+        resetsAt: teamRow ? teamRow.resets_at : null
+      });
+    }
+
+    // 3. Personal sourcing credit -- the friendly per-user gate.
+    const { data: spendData, error: spendErr } = await userSupabase.rpc("spend_sourcing_credit", {
+      p_max: Number(SOURCING_CREDIT_MAX),
+      p_regen_ms: Number(SOURCING_CREDIT_REGEN_MS)
+    });
+    if (spendErr) return res.status(500).json({ error: spendErr.message });
+    const spendRow = spendData && spendData[0];
+    if (!spendRow || !spendRow.success) {
+      return res.status(429).json({
+        code: "no_sourcing_credits",
+        error: `You're out of sourcing credits — more in ${spendRow ? minutesUntil(spendRow.next_full_at) : "a while"}.`,
+        nextFullAt: spendRow ? spendRow.next_full_at : null
+      });
+    }
+
+    // 4. Reserve an email-credit budget for this run. Not a hard block if
+    // it comes back 0 -- the search still runs, it just won't enrich anyone
+    // until credits regenerate. The workflow enriches at most this many
+    // candidates (by search rank), so unused budget gets refunded once we
+    // know how many were actually attempted (see /api/results/:id below).
+    const { data: reserveData, error: reserveErr } = await userSupabase.rpc("reserve_email_credits", {
+      requested: 100,
+      p_max: Number(EMAIL_CREDIT_MAX),
+      p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
+    });
+    if (reserveErr) return res.status(500).json({ error: reserveErr.message });
+    const emailBudget = (reserveData && reserveData[0] && reserveData[0].granted) || 0;
+
+    const requestId = randomUUID();
+    pendingReservations.set(requestId, {
+      token: req.supabaseToken,
+      emailBudget,
+      createdAt: Date.now(),
+      reconciled: false
+    });
+
     // n8n's Form Trigger does NOT use the field's real name (booleanSearchString,
     // locationRegion, etc.) as the multipart field name — it uses positional
     // keys matching the field's order in the form definition: field-0, field-1,
@@ -178,12 +339,13 @@ app.post("/api/submit", async (req, res) => {
       "seniorityLevel",      // field-6
       "networkDistance",     // field-7
       "spotlights",          // field-8
-      "recruitCrmJob"        // field-9
+      "recruitCrmJob",       // field-9
+      "emailCreditBudget"    // field-10 -- caps how many candidates get Apollo/Seamless enrichment this run
     ];
 
     const form = new FormData();
     FIELD_ORDER.forEach((key, i) => {
-      const value = fields[key];
+      const value = key === "emailCreditBudget" ? emailBudget : fields[key];
       form.append(`field-${i}`, value !== undefined && value !== null ? String(value) : "");
     });
 
@@ -200,6 +362,10 @@ app.post("/api/submit", async (req, res) => {
     const submitRes = await fetch(webhookUrl, { method: "POST", body: form });
     if (!submitRes.ok) {
       const text = await submitRes.text().catch(() => "");
+      // The search itself never reached n8n -- refund both credits so a
+      // webhook hiccup doesn't cost the user anything.
+      pendingReservations.delete(requestId);
+      await userSupabase.rpc("refund_email_credits", { amount: emailBudget, p_max: Number(EMAIL_CREDIT_MAX), p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS) }).catch(() => {});
       return res.status(502).json({
         error: `Webhook submit failed (${submitRes.status}). Is the workflow active? ${text.slice(0, 300)}`
       });
@@ -213,7 +379,7 @@ app.post("/api/submit", async (req, res) => {
     // timeout value we picked here. The dashboard instead polls
     // /api/find-execution itself, as many short-lived requests as it
     // takes, which has no such ceiling.
-    res.json({ ok: true, submittedAt: submitFloor });
+    res.json({ ok: true, submittedAt: submitFloor, requestId, emailBudget });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -480,7 +646,78 @@ app.get("/api/results/:id", async (req, res) => {
     const totalFoundOnLinkedIn =
       (searchItems[0] && searchItems[0].paging && searchItems[0].paging.total_count) || null;
 
+    // ---- Credit reconciliation ----
+    // Refund whatever part of the reserved email budget went unused. The
+    // workflow's credit-budget gate routes over-budget candidates through a
+    // stub that sets email_status to "skipped_credit_budget" instead of
+    // calling Apollo/Seamless -- reusing the existing email_status field
+    // that already flows through "Extract Enriched Email" unchanged.
+    const requestId = req.query.requestId;
+    const reservation = requestId && pendingReservations.get(requestId);
+    if (reservation && !reservation.reconciled) {
+      const actuallyAttempted = candidates.filter((c) => c.email_status !== "skipped_credit_budget").length;
+      const unused = Math.max(0, reservation.emailBudget - actuallyAttempted);
+      const userSupabase = userClient(req.supabaseToken);
+      if (unused > 0) {
+        await userSupabase.rpc("refund_email_credits", {
+          amount: unused,
+          p_max: Number(EMAIL_CREDIT_MAX),
+          p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
+        }).catch(() => {});
+      }
+      await userSupabase.rpc("record_team_candidates", {
+        candidate_count: candidates.length,
+        p_day_ms: Number(TEAM_DAY_MS)
+      }).catch(() => {});
+      reservation.reconciled = true;
+      pendingReservations.delete(requestId);
+    }
+
     res.json({ candidates, summary, totalFoundOnLinkedIn });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Live credit status for the signed-in user, plus the team-wide ceiling --
+ * powers the meter in the dashboard's masthead. Balances are computed
+ * on-read (lazy regen), so this is always accurate without a background job.
+ */
+app.get("/api/credits", async (req, res) => {
+  try {
+    const userSupabase = userClient(req.supabaseToken);
+    const [personalRes, teamRes] = await Promise.all([
+      userSupabase.rpc("get_credit_balance", {
+        p_sourcing_max: Number(SOURCING_CREDIT_MAX),
+        p_sourcing_regen_ms: Number(SOURCING_CREDIT_REGEN_MS),
+        p_email_max: Number(EMAIL_CREDIT_MAX),
+        p_email_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
+      }),
+      userSupabase.rpc("get_team_usage", {
+        p_max_per_day: Number(TEAM_MAX_SEARCHES_PER_DAY),
+        p_max_candidates_per_day: Number(TEAM_MAX_CANDIDATES_PER_DAY),
+        p_day_ms: Number(TEAM_DAY_MS)
+      })
+    ]);
+
+    if (personalRes.error) return res.status(500).json({ error: personalRes.error.message });
+    if (teamRes.error) return res.status(500).json({ error: teamRes.error.message });
+
+    const p = personalRes.data && personalRes.data[0];
+    const t = teamRes.data && teamRes.data[0];
+
+    res.json({
+      sourcing: { balance: p.sourcing_credits, max: p.sourcing_max, nextFullAt: p.sourcing_next_full_at },
+      email: { balance: p.email_credits, max: p.email_max, nextFullAt: p.email_next_full_at },
+      team: {
+        searchesUsedToday: t.searches_used_today,
+        maxSearchesPerDay: t.max_searches_per_day,
+        dayResetsAt: t.day_resets_at,
+        candidatesTouchedToday: t.candidates_touched_today,
+        maxCandidatesPerDay: t.max_candidates_per_day
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -508,6 +508,18 @@
   .suite-tab.active{ background: var(--ink); color: var(--paper-raised); border-color: var(--ink); }
   .suite-tab.signout{ margin-left: auto; background: none; cursor: pointer; }
   .suite-tab.signout:hover{ color: var(--rust); border-color: var(--rust); }
+
+  /* ---------- Credit meter ---------- */
+  .credit-meter{ margin-top: 8px; display:flex; flex-direction:column; gap: 2px; align-items: flex-end; }
+  .credit-pool{ display:flex; align-items:center; gap:6px; }
+  .credit-pool .cp-label{ color: var(--ink-soft); }
+  .credit-pool .cp-value{ font-weight:600; color: var(--teal-deep); }
+  .credit-pool.low .cp-value{ color: var(--amber); }
+  .credit-pool.empty .cp-value{ color: var(--rust); }
+  .credit-note{ font-size: 10.5px; color: var(--ink-soft); }
+  .credit-note.err{ color: var(--rust); }
+
+  .cc-badge.email-skipped{ border-color: var(--ink-soft); color: var(--ink-soft); font-style: italic; }
 </style>
 </head>
 <body>
@@ -528,6 +540,7 @@
     <div class="masthead-meta">
       Workflow: <span>LinkedIn Sourcing Tool</span><br/>
       Runs via Unipile · OpenRouter · Apollo · RecruitCRM
+      <div class="credit-meter" id="creditMeter">Loading credits…</div>
     </div>
   </header>
 
@@ -743,7 +756,7 @@
           ${c.headline ? `<div class="cc-headline">${escapeHtml(c.headline)}</div>` : ""}
           <div class="cc-badges">
             ${c.network_distance ? `<span class="cc-badge">${escapeHtml(formatDistance(c.network_distance))}</span>` : ""}
-            ${c.email_status ? `<span class="cc-badge ${c.email_status === "verified" ? "email-verified" : c.email_status === "extrapolated" ? "email-extrapolated" : ""}">${escapeHtml(c.email_status)}</span>` : ""}
+            ${c.email_status ? `<span class="cc-badge ${c.email_status === "verified" ? "email-verified" : c.email_status === "extrapolated" ? "email-extrapolated" : c.email_status === "skipped_credit_budget" ? "email-skipped" : ""}">${c.email_status === "skipped_credit_budget" ? "not enriched — over credit budget" : escapeHtml(c.email_status)}</span>` : ""}
           </div>
           <div class="cc-tabs">
             <button class="cc-tab-btn active" data-card="${cardId}" data-tab="fit">Fit</button>
@@ -1006,6 +1019,7 @@
     ledgerLine("Request received", "ok");
 
     let executionId;
+    let requestId;
     try{
       ledgerLine("Starting workflow…");
       const submitRes = await fetch("/api/submit", {
@@ -1018,6 +1032,7 @@
       if(!submitRes.ok || submitJson.error){
         throw new Error(submitJson.error || "Submit failed.");
       }
+      requestId = submitJson.requestId;
 
       // Poll for the execution id ourselves, one short request at a time —
       // deliberately not a single long-blocking call, since a big batch can
@@ -1043,6 +1058,7 @@
     } catch(err){
       ledgerLine("Could not start the workflow: " + err.message, "err");
       setStatus("err", "Failed to start");
+      loadCredits();
       return;
     }
 
@@ -1089,7 +1105,8 @@
     ledgerLine("Loading results…");
 
     try{
-      const resultsRes = await fetch(`/api/results/${executionId}`);
+      const resultsUrl = requestId ? `/api/results/${executionId}?requestId=${encodeURIComponent(requestId)}` : `/api/results/${executionId}`;
+      const resultsRes = await fetch(resultsUrl);
       const resultsJson = await resultsRes.json();
       showRaw(resultsJson);
       if(!resultsRes.ok || resultsJson.error) throw new Error(resultsJson.error || "Results fetch failed.");
@@ -1100,6 +1117,8 @@
     } catch(err){
       ledgerLine("Run finished, but results couldn't be loaded: " + err.message, "err");
       setStatus("err", "Results unavailable");
+    } finally {
+      loadCredits();
     }
   }
 
@@ -1186,11 +1205,74 @@
   $("historyRefresh").addEventListener("click", loadHistory);
   loadHistory();
 
+  // ---------- Credit meter ----------
+  const creditMeter = $("creditMeter");
+  let creditsBlocked = false;
+  let creditsBlockReason = "";
+
+  function fmtCountdown(iso){
+    if(!iso) return "a while";
+    const mins = Math.max(1, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
+    if(mins < 60) return mins + "m";
+    return Math.floor(mins / 60) + "h " + (mins % 60) + "m";
+  }
+
+  function poolHtml(label, balance, max, nextFullAt){
+    const cls = balance <= 0 ? "empty" : balance < max * 0.34 ? "low" : "";
+    const refill = nextFullAt ? ` · refills in ${fmtCountdown(nextFullAt)}` : "";
+    return `<div class="credit-pool ${cls}"><span class="cp-label">${label}</span><span class="cp-value">${Math.floor(balance)}/${max}</span><span class="credit-note">${refill}</span></div>`;
+  }
+
+  async function loadCredits(){
+    try{
+      const res = await fetch("/api/credits");
+      const data = await res.json();
+      if(!res.ok || data.error) throw new Error(data.error || "Failed to load credits.");
+
+      creditMeter.innerHTML =
+        poolHtml("Sourcing", data.sourcing.balance, data.sourcing.max, data.sourcing.nextFullAt) +
+        poolHtml("Emails", data.email.balance, data.email.max, data.email.nextFullAt);
+
+      const teamHit = data.team.searchesUsedToday >= data.team.maxSearchesPerDay ||
+        data.team.candidatesTouchedToday >= data.team.maxCandidatesPerDay;
+      if(teamHit){
+        creditsBlocked = true;
+        creditsBlockReason = `Team-wide LinkedIn usage limit reached for today — resets ${new Date(data.team.dayResetsAt).toLocaleString()}.`;
+      } else if(data.sourcing.balance < 1){
+        creditsBlocked = true;
+        creditsBlockReason = `Out of sourcing credits — more in ${fmtCountdown(data.sourcing.nextFullAt)}.`;
+      } else {
+        creditsBlocked = false;
+        creditsBlockReason = "";
+      }
+    } catch(err){
+      // Fail open on a meter read error — the server-side check inside
+      // /api/submit is the real gate either way, this is just the readout.
+      creditMeter.innerHTML = `<div class="credit-note err">Credits unavailable: ${escapeHtml(err.message)}</div>`;
+      creditsBlocked = false;
+    }
+    updateSubmitAvailability();
+  }
+
+  function updateSubmitAvailability(){
+    if(submitBtn.textContent === "Running…") return; // an active run owns the button's disabled state
+    submitBtn.disabled = creditsBlocked;
+    submitBtn.title = creditsBlocked ? creditsBlockReason : "";
+  }
+
+  loadCredits();
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const booleanSearchString = $("booleanSearchString").value.trim();
     const locationRegion = $("locationRegion").value.trim();
     if(!booleanSearchString || !locationRegion){
+      formError.textContent = "Fill in the boolean search string and location.";
+      formError.style.display = "block";
+      return;
+    }
+    if(creditsBlocked){
+      formError.textContent = creditsBlockReason;
       formError.style.display = "block";
       return;
     }
@@ -1213,8 +1295,8 @@
     submitBtn.disabled = true;
     submitBtn.textContent = "Running…";
     runSearch(formData).finally(() => {
-      submitBtn.disabled = false;
       submitBtn.textContent = "Run search";
+      updateSubmitAvailability();
     });
   });
 
