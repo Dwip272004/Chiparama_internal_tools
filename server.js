@@ -615,108 +615,118 @@ async function fetchSheetRows(sheetName) {
   });
 }
 
-// Combines the Search Requests + Candidates tabs into a reusable search
-// history: each past boolean search string, how many candidates it pooled,
-// how many cleared the fit-score bar, and average fit score.
-// Maps a raw Google Sheet row (keyed by column header) into the same shape
-// the dashboard's candidate cards expect. Tries a couple of header variants
-// since the exact sheet header text wasn't directly verifiable from here.
-function mapCandidateRow(row) {
-  const pick = (...keys) => {
-    for (const k of keys) {
-      if (row[k] !== undefined && row[k] !== null && row[k] !== "") return row[k];
-    }
-    return "";
-  };
+// Maps a Supabase `candidates` row (snake_case columns) into the shape the
+// dashboard's candidate cards already expect -- `current_role` is kept as
+// the output key even though the column is `current_title` (a reserved
+// word in Postgres), so the frontend needed zero changes for this cutover.
+// Also carries the newer curated fields through for the Profile tab.
+function mapCandidateRow(c) {
   return {
-    name: pick("Name", "name"),
-    headline: pick("Headline", "headline"),
-    location: pick("Location", "location"),
-    current_role: pick("Current Role", "Current Role/Title", "current_role"),
-    current_company: pick("Current Company", "current_company"),
-    public_profile_url: pick("Public Profile URL", "LinkedIn URL", "Profile URL", "public_profile_url"),
-    talent_profile_url: pick("Talent Profile URL", "Recruiter Profile URL", "talent_profile_url"),
-    network_distance: pick("Network Distance", "network_distance"),
-    fit_score: (() => {
-      const v = pick("Fit Score", "fit_score");
-      const n = parseFloat(v);
-      return isNaN(n) ? v : n;
-    })(),
-    ai_summary: pick("AI Summary", "ai_summary"),
-    matched_signals: pick("Matched Signals", "matched_signals"),
-    gaps: pick("Gaps", "gaps"),
-    email: pick("Email", "email"),
-    email_status: pick("Email Status", "email_status"),
-    sourced_at: pick("Sourced At", "sourced_at"),
-    recruitcrm_slug: pick("RecruitCRM Slug", "recruitcrm_slug"),
-    assigned_job: pick("Assigned Job", "assigned_job"),
-    assigned_at: pick("Assigned At", "assigned_at")
+    name: c.name || "",
+    headline: c.headline || "",
+    location: c.location || "",
+    current_role: c.current_title || "",
+    current_company: c.current_company || "",
+    public_profile_url: c.public_profile_url || "",
+    talent_profile_url: c.talent_profile_url || "",
+    network_distance: c.network_distance || "",
+    fit_score: c.fit_score === null || c.fit_score === undefined ? "" : c.fit_score,
+    ai_summary: c.ai_summary || "",
+    matched_signals: c.matched_signals || "",
+    gaps: c.gaps || "",
+    email: c.email || "",
+    email_status: c.email_status || "",
+    sourced_at: c.sourced_at || "",
+    recruitcrm_slug: c.recruitcrm_slug || "",
+    assigned_job: c.assigned_job || "",
+    assigned_at: c.assigned_at || "",
+    // Curated rich fields (skills, org info, etc.) -- powers the Profile tab.
+    skills: c.skills || [],
+    seniority: c.seniority || "",
+    industry: c.industry || "",
+    connections_count: c.connections_count ?? null,
+    profile_picture_url: c.profile_picture_url || "",
+    certifications: c.certifications || null,
+    projects: c.projects || null,
+    languages: c.languages || null,
+    employment_history: c.employment_history || null,
+    organization_name: c.organization_name || "",
+    organization_industry: c.organization_industry || "",
+    organization_employee_count: c.organization_employee_count ?? null,
+    organization_website: c.organization_website || "",
+    organization_linkedin_url: c.organization_linkedin_url || "",
+    twitter_url: c.twitter_url || "",
+    github_url: c.github_url || ""
   };
+}
+
+// PostgREST enforces a max-rows cap per request (1000 by default) at the
+// project level -- .range() alone can't exceed it, only page within it. As
+// candidate volume grows past that (already does today), this pages
+// through in 1000-row windows until a short page signals the end.
+async function fetchAllRows(userSupabase, table) {
+  const pageSize = 1000;
+  let offset = 0;
+  const all = [];
+  for (;;) {
+    const { data, error } = await userSupabase.from(table).select("*").range(offset, offset + pageSize - 1);
+    if (error) throw new Error(error.message);
+    all.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
 }
 
 app.get("/api/sheet-overview", async (req, res) => {
   try {
+    const userSupabase = userClient(req.supabaseToken);
     const [requests, candidates] = await Promise.all([
-      fetchSheetRows(SEARCH_REQUESTS_TAB).catch(() => []), // best-effort only, see below
-      fetchSheetRows(CANDIDATES_TAB)
+      fetchAllRows(userSupabase, "search_requests"),
+      fetchAllRows(userSupabase, "candidates")
     ]);
 
-    // Build history straight from the Candidates tab, grouped by the unique
-    // search keyword strings actually used. This is the reliable source —
-    // the Search Requests tab was found to silently return nothing (wrong
-    // headers/tab name/never written), which made totals populate but the
-    // history list stay empty. Candidates data alone is enough to answer
-    // "what searches have we run and how many candidates did each pool."
-    const bySearch = {};
-    for (const c of candidates) {
-      const key = c["Search Keywords"] || "(unknown search)";
-      if (!bySearch[key]) {
-        bySearch[key] = { count: 0, qualified: 0, scoreSum: 0, scoreCount: 0, lastSourced: null, candidates: [], totalFoundOnLinkedIn: null };
+    const requestById = new Map((requests || []).map((r) => [r.id, r]));
+
+    // Grouped by search_request_id now that every candidate is properly
+    // linked to one (a real improvement over the old sheet's grouping by
+    // keyword string, which merged together any searches that happened to
+    // reuse the same boolean string). Falls back to keyword grouping only
+    // for the rare candidate that somehow has no link.
+    const bySearch = new Map();
+    for (const c of candidates || []) {
+      const key = c.search_request_id || `unlinked:${(c.search_keywords || "").toLowerCase()}`;
+      if (!bySearch.has(key)) {
+        bySearch.set(key, {
+          count: 0, qualified: 0, scoreSum: 0, scoreCount: 0, lastSourced: null,
+          candidates: [], totalFoundOnLinkedIn: null, searchKeywordsFallback: c.search_keywords || ""
+        });
       }
-      const bucket = bySearch[key];
+      const bucket = bySearch.get(key);
       bucket.count += 1;
-      const score = parseFloat(c["Fit Score"]);
+      const score = parseFloat(c.fit_score);
       if (!isNaN(score)) {
         bucket.scoreSum += score;
         bucket.scoreCount += 1;
         if (score > 60) bucket.qualified += 1;
       }
-      // Reads the "LinkedIn Total Found" column once it exists on the sheet
-      // — every row for the same search carries the same number, so the
-      // first non-empty one found is enough.
-      const totalFound = parseInt(c["LinkedIn Total Found"], 10);
-      if (!bucket.totalFoundOnLinkedIn && !isNaN(totalFound)) bucket.totalFoundOnLinkedIn = totalFound;
-      const sourcedAt = c["Sourced At"];
-      if (sourcedAt && (!bucket.lastSourced || sourcedAt > bucket.lastSourced)) bucket.lastSourced = sourcedAt;
+      if (!bucket.totalFoundOnLinkedIn && c.linkedin_total_found) bucket.totalFoundOnLinkedIn = c.linkedin_total_found;
+      if (c.sourced_at && (!bucket.lastSourced || c.sourced_at > bucket.lastSourced)) bucket.lastSourced = c.sourced_at;
       bucket.candidates.push(mapCandidateRow(c));
     }
     // Show strongest fits first within each search group.
-    Object.values(bySearch).forEach((b) => b.candidates.sort((a, b2) => (b2.fit_score || 0) - (a.fit_score || 0)));
-
-    // Best-effort enrichment: if the Search Requests tab does have usable
-    // rows, borrow the original target location/role context per search
-    // string. If it doesn't, history still works fine without this.
-    const requestMeta = new Map();
-    for (const r of requests) {
-      const key = r["Boolean Search String"];
-      if (!key) continue;
-      const existing = requestMeta.get(key);
-      if (existing && new Date(existing.submittedAt || 0) >= new Date(r["Submitted At"] || 0)) continue;
-      requestMeta.set(key, {
-        location: r["Location/Region"] || "",
-        roleContext: r["Role Context"] || "",
-        submittedAt: r["Submitted At"] || null
-      });
+    for (const bucket of bySearch.values()) {
+      bucket.candidates.sort((a, b) => (b.fit_score || 0) - (a.fit_score || 0));
     }
 
-    const history = Object.entries(bySearch)
-      .map(([searchString, stats]) => {
-        const meta = requestMeta.get(searchString) || {};
+    const history = Array.from(bySearch.entries())
+      .map(([key, stats]) => {
+        const request = requestById.get(key);
         return {
-          searchString,
-          location: meta.location || "",
-          roleContext: meta.roleContext || "",
-          submittedAt: meta.submittedAt || stats.lastSourced,
+          searchString: (request && request.boolean_search_string) || stats.searchKeywordsFallback || "(unknown search)",
+          location: (request && request.location_region) || "",
+          roleContext: (request && request.role_context) || "",
+          submittedAt: (request && request.submitted_at) || stats.lastSourced,
           candidatesPooled: stats.count,
           qualifiedCount: stats.qualified,
           avgFitScore: stats.scoreCount ? Math.round(stats.scoreSum / stats.scoreCount) : null,
@@ -729,8 +739,8 @@ app.get("/api/sheet-overview", async (req, res) => {
 
     const totals = {
       totalSearches: history.length,
-      totalCandidatesPooled: candidates.length,
-      totalQualified: candidates.filter((c) => parseFloat(c["Fit Score"]) > 60).length
+      totalCandidatesPooled: (candidates || []).length,
+      totalQualified: (candidates || []).filter((c) => parseFloat(c.fit_score) > 60).length
     };
 
     res.json({ history, totals });

@@ -413,6 +413,17 @@
   .cc-tabpanel{ font-size: 12.5px; margin-top: 10px; line-height:1.5; }
   .cc-tabpanel[hidden]{ display:none; }
 
+  /* ---------- Profile tab ---------- */
+  .cc-profile-row{ display:flex; flex-wrap:wrap; gap: 6px 16px; margin-bottom: 8px; font-size: 12px; }
+  .cc-profile-row .lbl{ color: var(--ink-soft); text-transform: uppercase; font-family:'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing:0.04em; margin-right: 4px; }
+  .cc-org{ font-size: 12.5px; margin-bottom: 10px; }
+  .cc-org .org-name{ font-weight: 600; }
+  .cc-history{ margin: 0; padding: 0; list-style: none; }
+  .cc-history li{ padding: 4px 0; border-top: 1px dashed var(--rule); font-size: 12px; }
+  .cc-history li:first-child{ border-top: none; }
+  .cc-history .h-title{ font-weight: 600; }
+  .cc-history .h-dates{ color: var(--ink-soft); font-size: 10.5px; font-family:'IBM Plex Mono', monospace; }
+
   /* ---------- History panel ---------- */
   .history{ position: sticky; top: 24px; }
   .history-head{
@@ -793,6 +804,15 @@
         el.dataset.profileUrl = c.public_profile_url || "";
         const tags = (c.matched_signals || "").split(",").map(s=>s.trim()).filter(Boolean).slice(0,4);
         const cardId = "cc-" + idx + "-" + Date.now();
+        const hasProfileData = (c.skills && c.skills.length) || c.seniority || c.organization_name || (c.employment_history && c.employment_history.length);
+        const skillTags = (c.skills || []).slice(0, 12);
+        const extraSkills = (c.skills || []).length - skillTags.length;
+        const historyEntries = (c.employment_history || []).slice(0, 5).map(e => ({
+          title: e.title || e.role || "",
+          company: e.organization_name || e.company || "",
+          start: e.start_date || e.start || "",
+          end: e.current ? "Present" : (e.end_date || e.end || "")
+        })).filter(e => e.title || e.company);
         const initials = (c.name || "?").trim().split(/\s+/).map(p => p[0]).filter(Boolean).slice(0,2).join("").toUpperCase();
         el.innerHTML = `
           <div class="cc-top">
@@ -814,12 +834,26 @@
           <div class="cc-tabs">
             <button class="cc-tab-btn active" data-card="${cardId}" data-tab="fit">Fit</button>
             ${c.gaps ? `<button class="cc-tab-btn" data-card="${cardId}" data-tab="gaps">Gaps</button>` : ""}
+            ${hasProfileData ? `<button class="cc-tab-btn" data-card="${cardId}" data-tab="profile">Profile</button>` : ""}
           </div>
           <div class="cc-tabpanel" data-card="${cardId}" data-panel="fit">
             ${c.ai_summary ? escapeHtml(c.ai_summary) : "<em>No summary available.</em>"}
             ${tags.length ? `<div class="cc-tags">${tags.map(t=>`<span class="cc-tag">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
           </div>
           ${c.gaps ? `<div class="cc-tabpanel" data-card="${cardId}" data-panel="gaps" hidden>${escapeHtml(c.gaps)}</div>` : ""}
+          ${hasProfileData ? `<div class="cc-tabpanel" data-card="${cardId}" data-panel="profile" hidden>
+            ${(c.seniority || c.industry) ? `<div class="cc-profile-row">
+              ${c.seniority ? `<span><span class="lbl">Seniority</span>${escapeHtml(c.seniority)}</span>` : ""}
+              ${c.industry ? `<span><span class="lbl">Industry</span>${escapeHtml(c.industry)}</span>` : ""}
+            </div>` : ""}
+            ${c.organization_name ? `<div class="cc-org">
+              <span class="org-name">${escapeHtml(c.organization_name)}</span>
+              ${c.organization_industry ? ` · ${escapeHtml(c.organization_industry)}` : ""}
+              ${c.organization_employee_count ? ` · ${escapeHtml(String(c.organization_employee_count))} employees` : ""}
+            </div>` : ""}
+            ${historyEntries.length ? `<ul class="cc-history">${historyEntries.map(e => `<li><div class="h-title">${escapeHtml(e.title)}${e.company ? " · " + escapeHtml(e.company) : ""}</div>${(e.start || e.end) ? `<div class="h-dates">${escapeHtml(e.start || "")}${e.start || e.end ? " – " : ""}${escapeHtml(e.end || "")}</div>` : ""}</li>`).join("")}</ul>` : ""}
+            ${skillTags.length ? `<div class="cc-tags">${skillTags.map(s=>`<span class="cc-tag">${escapeHtml(s)}</span>`).join("")}${extraSkills > 0 ? `<span class="cc-tag">+${extraSkills} more</span>` : ""}</div>` : ""}
+          </div>` : ""}
           <div class="cc-foot">
             <span>
               ${c.public_profile_url ? `<a class="cc-link" href="${escapeHtml(c.public_profile_url)}" target="_blank" rel="noopener">Profile</a>` : ""}
