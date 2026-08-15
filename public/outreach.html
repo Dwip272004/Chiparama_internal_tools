@@ -158,6 +158,25 @@
   .toast.err{ border-left-color: var(--red); }
   .toast.info{ border-left-color: var(--amber); }
   @keyframes toast-in{ to{ opacity:1; transform: translateX(0); } }
+
+  /* ---------- Outreach sequences (chain view) ---------- */
+  .seq-list{ max-height: 640px; overflow-y: auto; }
+  .seq-row{ padding: 14px 0; border-top: 1px dashed var(--border); }
+  .seq-row:first-of-type{ border-top: none; padding-top: 4px; }
+  .seq-email{ font-family:'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .seq-role{ font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+  .seq-chain{ display:flex; align-items:center; flex-wrap: wrap; gap: 4px; }
+  .seq-link{
+    display:flex; flex-direction:column; align-items:center; gap: 2px;
+    background: var(--teal-bg); border: 1px solid var(--teal); border-radius: var(--radius);
+    padding: 6px 10px; min-width: 84px; text-align:center;
+  }
+  .seq-link.replied{ background: var(--amber-bg); border-color: var(--amber); }
+  .seq-template{ font-family:'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; color: var(--teal); }
+  .seq-link.replied .seq-template{ color: var(--amber); }
+  .seq-date{ font-size: 9.5px; color: var(--text-faint); font-family:'IBM Plex Mono', monospace; }
+  .seq-replied-badge{ font-size: 8.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
+  .seq-arrow{ color: var(--text-faint); font-size: 14px; flex: none; }
 </style>
 </head>
 <body>
@@ -222,6 +241,19 @@
     </table>
     <div class="empty-note" id="sendsEmpty" style="display:none;">No sends match that filter.</div>
     <div class="table-foot" id="sendsFoot"></div>
+  </section>
+
+  <section class="panel">
+    <div class="table-head">
+      <div>
+        <h2 style="margin-bottom:2px;">Outreach Sequences</h2>
+        <div class="panel-sub" style="margin-bottom:0;" id="sequenceCount">Each candidate's touches, chained in date order</div>
+      </div>
+      <input id="sequenceFilter" type="text" placeholder="Filter by email or job…">
+    </div>
+    <div class="seq-list" id="sequenceList"></div>
+    <div class="empty-note" id="sequenceEmpty" style="display:none;">No sequences match that filter.</div>
+    <div class="table-foot" id="sequenceFoot"></div>
   </section>
 
   <div class="footer">
@@ -313,6 +345,69 @@ function render(data){
 
   window.__sendsLog = log.slice().sort((a,b) => new Date(b.sentAt||0) - new Date(a.sentAt||0));
   renderSendsTable();
+
+  window.__sequencesByEmail = buildSequences(log);
+  renderSequences();
+}
+
+// Groups the flat outreach log into one chronological chain per candidate --
+// same source data as the Recent Sends table, just organized to answer
+// "what's the full history with this person" instead of "what happened most
+// recently across everyone."
+function buildSequences(log){
+  const byEmail = {};
+  log.forEach(r => {
+    const email = r.candidateEmail || 'Unknown';
+    if(!byEmail[email]) byEmail[email] = [];
+    byEmail[email].push(r);
+  });
+  Object.values(byEmail).forEach(touches => touches.sort((a,b) => new Date(a.sentAt||0) - new Date(b.sentAt||0)));
+  return byEmail;
+}
+
+function renderSequences(){
+  const byEmail = window.__sequencesByEmail || {};
+  const q = (document.getElementById('sequenceFilter').value || '').toLowerCase().trim();
+  const allEmails = Object.keys(byEmail);
+  const emails = q ? allEmails.filter(email =>
+    email.toLowerCase().includes(q) || byEmail[email].some(t => (t.targetRole||'').toLowerCase().includes(q))
+  ) : allEmails;
+  // Most-recently-active sequences first.
+  emails.sort((a,b) => new Date(byEmail[b][byEmail[b].length-1].sentAt||0) - new Date(byEmail[a][byEmail[a].length-1].sentAt||0));
+
+  document.getElementById('sequenceCount').textContent =
+    fmtNum(allEmails.length) + ' candidate' + (allEmails.length===1?'':'s') + ' with outreach history';
+
+  const LIMIT = 40;
+  const shown = emails.slice(0, LIMIT);
+  const list = document.getElementById('sequenceList');
+  const emptyMsg = document.getElementById('sequenceEmpty');
+
+  if(shown.length === 0){
+    list.innerHTML = '';
+    emptyMsg.style.display = 'block';
+  }else{
+    emptyMsg.style.display = 'none';
+    list.innerHTML = shown.map(email => {
+      const touches = byEmail[email];
+      const role = touches[touches.length-1].targetRole || '';
+      const chain = touches.map((t, i) => {
+        const arrow = i > 0 ? '<span class="seq-arrow">→</span>' : '';
+        const repliedCls = t.replied ? ' replied' : '';
+        const badge = t.replied ? '<span class="seq-replied-badge">Replied</span>' : '';
+        return `${arrow}<div class="seq-link${repliedCls}"><span class="seq-template">Template ${escapeHtml(t.templateId ?? '?')}</span><span class="seq-date">${fmtDate(t.sentAt)}</span>${badge}</div>`;
+      }).join('');
+      return `
+        <div class="seq-row">
+          <div class="seq-email">${escapeHtml(email)}</div>
+          ${role ? `<div class="seq-role">${escapeHtml(role)}</div>` : ''}
+          <div class="seq-chain">${chain}</div>
+        </div>`;
+    }).join('');
+  }
+
+  document.getElementById('sequenceFoot').textContent =
+    emails.length > LIMIT ? `Showing latest ${LIMIT} of ${emails.length} matching sequences` : `Showing ${emails.length} sequence${emails.length===1?'':'s'}`;
 }
 
 function renderSendsTable(){
@@ -348,6 +443,7 @@ function renderSendsTable(){
 }
 
 document.getElementById('sendsFilter').addEventListener('input', renderSendsTable);
+document.getElementById('sequenceFilter').addEventListener('input', renderSequences);
 loadDashboard();
 setInterval(loadDashboard, REFRESH_MS);
 
