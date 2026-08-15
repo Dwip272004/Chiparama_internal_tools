@@ -234,6 +234,41 @@
   .dot.err{ background: var(--rust); }
   @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
 
+  /* ---------- Progress bar ---------- */
+  .progress-wrap{ margin-bottom: 14px; }
+  .progress-track{
+    height: 6px; border-radius: 3px; overflow: hidden;
+    background: var(--rule);
+    position: relative;
+  }
+  .progress-fill{
+    height: 100%; border-radius: 3px;
+    background: var(--teal);
+    width: 0%;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .progress-fill.err{ background: var(--rust); }
+  .progress-fill.indeterminate{
+    width: 40% !important;
+    background: linear-gradient(90deg, transparent, var(--teal), transparent);
+    animation: progress-slide 1.4s ease-in-out infinite;
+    transition: none;
+  }
+  @keyframes progress-slide{
+    0%{ transform: translateX(-120%); }
+    100%{ transform: translateX(280%); }
+  }
+  .progress-meta{
+    display:flex; justify-content: space-between; align-items:center;
+    margin-top: 6px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+  }
+  .progress-meta .quip{ font-style: italic; }
+  .progress-meta .quip.cycling{ animation: quip-fade 3.5s ease-in-out infinite; }
+  @keyframes quip-fade{ 0%,100%{ opacity: 0.55; } 50%{ opacity: 1; } }
+
   .ledger-lines{ font-family:'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.9; }
   .ledger-line{
     display:flex; gap:10px; opacity:0; transform: translateY(3px);
@@ -711,12 +746,81 @@
   let runCount = 0;
   let linesEl, dotEl;
 
+  // ---------- Progress bar: makes the 2-2.5min wait feel alive instead of dead ----------
+  let progressFillEl, progressQuipEl, elapsedEl, elapsedTimer, elapsedStart, quipTimer;
+
+  const WAIT_QUIPS = [
+    "Waking up the LinkedIn crawler…",
+    "Politely asking LinkedIn for names…",
+    "Teaching the AI what \"senior\" means…",
+    "Counting profile pictures…",
+    "Untangling boolean logic…",
+    "Making friends with the API…",
+    "This part always takes a minute…",
+    "Sharpening the fit-score pencil…"
+  ];
+
+  function startElapsedTimer(){
+    elapsedStart = Date.now();
+    updateElapsed();
+    elapsedTimer = setInterval(updateElapsed, 1000);
+  }
+  function updateElapsed(){
+    const secs = Math.floor((Date.now() - elapsedStart) / 1000);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    elapsedEl.textContent = m + ":" + String(s).padStart(2, "0");
+  }
+  function stopElapsedTimer(){
+    if(elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+
+  function startQuipCycle(){
+    let i = 0;
+    progressQuipEl.textContent = WAIT_QUIPS[0];
+    progressQuipEl.classList.add("cycling");
+    quipTimer = setInterval(() => {
+      i = (i + 1) % WAIT_QUIPS.length;
+      progressQuipEl.textContent = WAIT_QUIPS[i];
+    }, 3500);
+  }
+  function stopQuipCycle(){
+    if(quipTimer) clearInterval(quipTimer);
+    quipTimer = null;
+    progressQuipEl.classList.remove("cycling");
+  }
+
+  // Switches the bar from the indeterminate shimmer to a real percentage
+  // once we actually know one (processed / total candidates).
+  function setProgressDeterminate(pct, label){
+    progressFillEl.classList.remove("indeterminate");
+    progressFillEl.style.width = Math.max(2, Math.min(100, pct)) + "%";
+    stopQuipCycle();
+    progressQuipEl.textContent = label;
+  }
+
+  function setProgressDone(isErr){
+    stopElapsedTimer();
+    stopQuipCycle();
+    progressFillEl.classList.remove("indeterminate");
+    progressFillEl.classList.toggle("err", !!isErr);
+    progressFillEl.style.width = "100%";
+  }
+
   function renderLedgerShell(){
     runCount += 1;
     slipNum.textContent = "No. " + String(runCount).padStart(3, "0");
     board.innerHTML = `
       <div class="ledger">
         <div class="ledger-title"><span class="dot live" id="statusDot"></span><span id="statusLabel">Processing</span></div>
+        <div class="progress-wrap">
+          <div class="progress-track"><div class="progress-fill indeterminate" id="progressFill"></div></div>
+          <div class="progress-meta">
+            <span class="quip" id="progressQuip"></span>
+            <span id="elapsedTime">0:00</span>
+          </div>
+        </div>
         <div class="ledger-lines" id="ledgerLines"></div>
         <button class="raw-toggle" id="rawToggle" style="display:none;">view raw response</button>
         <pre class="raw" id="rawBox"></pre>
@@ -724,6 +828,11 @@
     `;
     linesEl = $("ledgerLines");
     dotEl = $("statusDot");
+    progressFillEl = $("progressFill");
+    progressQuipEl = $("progressQuip");
+    elapsedEl = $("elapsedTime");
+    startElapsedTimer();
+    startQuipCycle();
     $("rawToggle").addEventListener("click", () => {
       const box = $("rawBox");
       box.style.display = box.style.display === "block" ? "none" : "block";
@@ -1187,6 +1296,7 @@
       if(!executionId){
         ledgerLine("The workflow started fine but is taking a while for n8n to list — check the History panel in a bit, or the Candidates sheet / RecruitCRM directly.", "err");
         setStatus("err", "Unconfirmed");
+        setProgressDone(true);
         return;
       }
       ledgerLine(`Running (#${executionId})`, "ok");
@@ -1195,6 +1305,7 @@
       setStatus("err", "Failed to start");
       showToast(err.message, "err");
       loadCredits();
+      setProgressDone(true);
       return;
     }
 
@@ -1213,12 +1324,14 @@
 
         if(statusJson.totalCandidates){
           const foundText = totalFoundOnLinkedIn ? ` (${totalFoundOnLinkedIn} total found on LinkedIn Recruiter)` : "";
-          const text = `Scored & filed ${statusJson.processedCandidates || 0} of ${statusJson.totalCandidates} candidates…${foundText}`;
+          const processed = statusJson.processedCandidates || 0;
+          const text = `Scored & filed ${processed} of ${statusJson.totalCandidates} candidates…${foundText}`;
           if(progressLine){
             progressLine.querySelector(".m").textContent = text;
           } else {
             progressLine = ledgerLine(text);
           }
+          setProgressDeterminate((processed / statusJson.totalCandidates) * 100, `${processed} / ${statusJson.totalCandidates} candidates scored`);
         }
 
         if(statusJson.status === "success" || statusJson.finished === true){ finalStatus = "success"; break; }
@@ -1229,11 +1342,13 @@
     if(finalStatus === "error"){
       ledgerLine("Workflow reported an error.", "err");
       setStatus("err", "Failed");
+      setProgressDone(true);
       return;
     }
     if(finalStatus !== "success"){
       ledgerLine("Still running after several minutes — check RecruitCRM / the Candidates sheet directly.", "err");
       setStatus("err", "Timed out watching status");
+      setProgressDone(true);
       return;
     }
 
@@ -1248,11 +1363,13 @@
       if(!resultsRes.ok || resultsJson.error) throw new Error(resultsJson.error || "Results fetch failed.");
       ledgerLine("Done", "ok");
       setStatus("done", "Complete");
+      setProgressDone(false);
       renderResults(resultsJson.candidates, resultsJson.summary, resultsJson.totalFoundOnLinkedIn);
       loadHistory();
     } catch(err){
       ledgerLine("Run finished, but results couldn't be loaded: " + err.message, "err");
       setStatus("err", "Results unavailable");
+      setProgressDone(true);
     } finally {
       loadCredits();
     }

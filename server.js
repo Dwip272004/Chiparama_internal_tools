@@ -300,11 +300,14 @@ setInterval(() => {
   const staleBefore = Date.now() - 15 * 60 * 1000;
   for (const [id, r] of pendingReservations) {
     if (!r.reconciled && r.createdAt < staleBefore) {
-      userClient(r.token).rpc("refund_email_credits", {
+      // Supabase's .rpc() builder is thenable (works with await) but doesn't
+      // implement .catch() directly -- Promise.resolve(...) wraps it in a
+      // real Promise first so chaining works.
+      Promise.resolve(userClient(r.token).rpc("refund_email_credits", {
         amount: r.emailBudget,
         p_max: Number(EMAIL_CREDIT_MAX),
         p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
-      }).then(() => pendingReservations.delete(id))
+      })).then(() => pendingReservations.delete(id))
         .catch(() => {}); // best-effort -- regen will eventually cover it anyway
     }
   }
@@ -491,7 +494,7 @@ app.post("/api/submit", async (req, res) => {
       // The search itself never reached n8n -- refund both credits so a
       // webhook hiccup doesn't cost the user anything.
       pendingReservations.delete(requestId);
-      await userSupabase.rpc("refund_email_credits", { amount: emailBudget, p_max: Number(EMAIL_CREDIT_MAX), p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS) }).catch(() => {});
+      await Promise.resolve(userSupabase.rpc("refund_email_credits", { amount: emailBudget, p_max: Number(EMAIL_CREDIT_MAX), p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS) })).catch(() => {});
       return res.status(502).json({
         error: `Webhook submit failed (${submitRes.status}). Is the workflow active? ${text.slice(0, 300)}`
       });
@@ -795,16 +798,16 @@ app.get("/api/results/:id", async (req, res) => {
       const unused = Math.max(0, reservation.emailBudget - actuallyAttempted);
       const userSupabase = userClient(req.supabaseToken);
       if (unused > 0) {
-        await userSupabase.rpc("refund_email_credits", {
+        await Promise.resolve(userSupabase.rpc("refund_email_credits", {
           amount: unused,
           p_max: Number(EMAIL_CREDIT_MAX),
           p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
-        }).catch(() => {});
+        })).catch(() => {});
       }
-      await userSupabase.rpc("record_team_candidates", {
+      await Promise.resolve(userSupabase.rpc("record_team_candidates", {
         candidate_count: candidates.length,
         p_day_ms: Number(TEAM_DAY_MS)
-      }).catch(() => {});
+      })).catch(() => {});
       reservation.reconciled = true;
       pendingReservations.delete(requestId);
     }
