@@ -66,56 +66,74 @@
 
   section.panel{
     background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
-    padding:20px 24px; margin-bottom:18px;
+    padding:16px 20px; margin-bottom:14px;
   }
   section.panel h2{
-    font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:18px;
+    font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:16px;
     margin:0 0 2px 0; color:var(--text);
   }
-  .panel-sub{ font-size:12.5px; color:var(--text-dim); margin-bottom:16px; }
+  .panel-sub{ font-size:11.5px; color:var(--text-dim); margin-bottom:12px; }
 
   .kpi-row{ display:grid; grid-template-columns:repeat(4,1fr); text-align:center; }
-  .kpi{ padding:2px 10px; }
-  .kpi .val{ font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:34px; line-height:1; }
-  .kpi .lbl{ font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-dim); margin-top:8px; }
+  .kpi{ padding:0 10px; }
+  .kpi .val{ font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:26px; line-height:1; }
+  .kpi .lbl{ font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-dim); margin-top:5px; }
   .kpi + .kpi{ border-left:1px dashed var(--border); }
 
+  /* ---------- Two-column admin layout: compact job sidebar + tabbed activity ---------- */
+  .main-grid{ display:grid; grid-template-columns: 280px 1fr; gap:14px; align-items:start; }
+  .job-panel .panel-sub{ margin-bottom:8px; }
   .job-row{
-    display:flex; align-items:center; justify-content:space-between; gap:14px;
-    padding:12px 0; border-top:1px dashed var(--border);
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:7px 0; border-top:1px dashed var(--border);
   }
-  .job-row:first-of-type{ border-top:none; padding-top:4px; }
-  .job-name{ font-size:14px; color:var(--text); font-weight:500; }
-  .job-badges{ display:flex; align-items:center; gap:10px; white-space:nowrap; }
-  .pill{ font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:2px 8px; border-radius:9px; }
+  .job-row:first-of-type{ border-top:none; padding-top:2px; }
+  .job-name{
+    font-size:12.5px; color:var(--text); font-weight:500;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;
+  }
+  .job-badges{ display:flex; align-items:center; gap:6px; white-space:nowrap; flex:none; }
+  .pill{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; padding:2px 7px; border-radius:9px; }
   .pill.sends{ background:var(--teal-bg); color:var(--teal); }
   .pill.reply-hi{ background:var(--amber-bg); color:var(--amber); }
   .pill.reply-lo{ color:var(--text-faint); }
 
-  .table-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
-  input#sendsFilter{
+  .tab-switch{ display:flex; gap:6px; }
+  .tab-btn{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.04em;
+    padding:6px 12px; border:1px solid var(--border); border-radius:var(--radius);
+    background:#fff; color:var(--text-dim); cursor:pointer;
+  }
+  .tab-btn:hover{ color:var(--text); border-color:var(--teal); }
+  .tab-btn.active{ background:var(--text); color:var(--panel); border-color:var(--text); }
+
+  .table-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px; }
+  input#activityFilter{
     background:#fff; border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace;
-    font-size:12px; padding:7px 10px; border-radius:var(--radius); min-width:230px; outline:none;
+    font-size:12px; padding:7px 10px; border-radius:var(--radius); min-width:210px; outline:none;
   }
-  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
   thead th{
-    text-align:left; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-faint);
-    font-weight:600; padding:0 10px 10px 0; border-bottom:1px solid var(--border);
+    text-align:left; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-faint);
+    font-weight:600; padding:0 10px 8px 0; border-bottom:1px solid var(--border);
   }
-  tbody td{ padding:9px 10px 9px 0; border-bottom:1px dashed var(--border); vertical-align:middle; }
+  tbody td{ padding:6px 10px 6px 0; border-bottom:1px dashed var(--border); vertical-align:middle; }
   tbody tr:last-child td{ border-bottom:none; }
   td.role{ color:var(--text-dim); max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  td.sent{ font-family:'IBM Plex Mono',monospace; color:var(--text-faint); white-space:nowrap; font-size:12px; }
+  td.sent{ font-family:'IBM Plex Mono',monospace; color:var(--text-faint); white-space:nowrap; font-size:11.5px; }
   .empty-note{ color:var(--text-faint); font-size:13px; padding:14px 0; }
-  .table-foot{ margin-top:10px; font-size:11px; color:var(--text-faint); font-family:'IBM Plex Mono',monospace; }
+  .table-foot{ margin-top:8px; font-size:11px; color:var(--text-faint); font-family:'IBM Plex Mono',monospace; }
 
   .footer{
     display:flex; align-items:center; justify-content:space-between; font-size:11.5px;
     color:var(--text-faint); font-family:'IBM Plex Mono',monospace; margin-top:6px; flex-wrap:wrap; gap:8px;
   }
 
+  @media (max-width:900px){
+    .main-grid{ grid-template-columns: 1fr; }
+  }
   @media (max-width:720px){
-    .kpi-row{ grid-template-columns:repeat(2,1fr); row-gap:18px; }
+    .kpi-row{ grid-template-columns:repeat(2,1fr); row-gap:14px; }
     .kpi + .kpi{ border-left:none; }
     .header{ flex-direction:column; align-items:flex-start; }
     .header-meta{ text-align:left; }
@@ -160,8 +178,8 @@
   @keyframes toast-in{ to{ opacity:1; transform: translateX(0); } }
 
   /* ---------- Outreach sequences (chain view) ---------- */
-  .seq-list{ max-height: 640px; overflow-y: auto; }
-  .seq-row{ padding: 14px 0; border-top: 1px dashed var(--border); }
+  .seq-list{ max-height: 560px; overflow-y: auto; }
+  .seq-row{ padding: 11px 0; border-top: 1px dashed var(--border); }
   .seq-row:first-of-type{ border-top: none; padding-top: 4px; }
   .seq-email{ font-family:'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
   .seq-role{ font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
@@ -216,47 +234,46 @@
     </div>
   </section>
 
-  <section class="panel">
-    <h2>Outreach by Job</h2>
-    <div class="panel-sub">Send volume and reply rate per job, pulled live from the Outreach Log</div>
-    <div id="jobList"></div>
-  </section>
+  <div class="main-grid">
+    <section class="panel job-panel">
+      <h2>Outreach by Job</h2>
+      <div class="panel-sub">Sends &amp; reply rate, live from the Outreach Log</div>
+      <div id="jobList"></div>
+    </section>
 
-  <section class="panel">
-    <div class="table-head">
-      <div>
-        <h2 style="margin-bottom:2px;">Recent Sends</h2>
-        <div class="panel-sub" style="margin-bottom:0;" id="sendsCount"></div>
+    <section class="panel">
+      <div class="table-head">
+        <div class="tab-switch">
+          <button type="button" class="tab-btn active" id="tabBtnSends" data-tab="sends">Recent Sends</button>
+          <button type="button" class="tab-btn" id="tabBtnSequences" data-tab="sequences">Sequences</button>
+        </div>
+        <input id="activityFilter" type="text" placeholder="Filter by email or job…">
       </div>
-      <input id="sendsFilter" type="text" placeholder="Filter by email or job…">
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Candidate</th>
-          <th>Job</th>
-          <th>Sent</th>
-          <th>Replied</th>
-        </tr>
-      </thead>
-      <tbody id="sendsBody"></tbody>
-    </table>
-    <div class="empty-note" id="sendsEmpty" style="display:none;">No sends match that filter.</div>
-    <div class="table-foot" id="sendsFoot"></div>
-  </section>
+      <div class="panel-sub" id="activityCount"></div>
 
-  <section class="panel">
-    <div class="table-head">
-      <div>
-        <h2 style="margin-bottom:2px;">Outreach Sequences</h2>
-        <div class="panel-sub" style="margin-bottom:0;" id="sequenceCount">Each candidate's touches, chained in date order</div>
+      <div id="sendsView">
+        <table>
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Job</th>
+              <th>Sent</th>
+              <th>Replied</th>
+            </tr>
+          </thead>
+          <tbody id="sendsBody"></tbody>
+        </table>
+        <div class="empty-note" id="sendsEmpty" style="display:none;">No sends match that filter.</div>
       </div>
-      <input id="sequenceFilter" type="text" placeholder="Filter by email or job…">
-    </div>
-    <div class="seq-list" id="sequenceList"></div>
-    <div class="empty-note" id="sequenceEmpty" style="display:none;">No sequences match that filter.</div>
-    <div class="table-foot" id="sequenceFoot"></div>
-  </section>
+
+      <div id="sequencesView" style="display:none;">
+        <div class="seq-list" id="sequenceList"></div>
+        <div class="empty-note" id="sequenceEmpty" style="display:none;">No sequences match that filter.</div>
+      </div>
+
+      <div class="table-foot" id="activityFoot"></div>
+    </section>
+  </div>
 
   <div class="footer">
     <span id="healthText">Checking system status…</span>
@@ -376,7 +393,7 @@ function buildSequences(log, stageHistory){
 
 function renderSequences(){
   const byEmail = window.__sequencesByEmail || {};
-  const q = (document.getElementById('sequenceFilter').value || '').toLowerCase().trim();
+  const q = (document.getElementById('activityFilter').value || '').toLowerCase().trim();
   const allEmails = Object.keys(byEmail);
   const emails = q ? allEmails.filter(email =>
     email.toLowerCase().includes(q) || byEmail[email].some(t => (t.targetRole||'').toLowerCase().includes(q))
@@ -384,8 +401,10 @@ function renderSequences(){
   // Most-recently-active sequences first.
   emails.sort((a,b) => new Date(byEmail[b][byEmail[b].length-1].sentAt||0) - new Date(byEmail[a][byEmail[a].length-1].sentAt||0));
 
-  document.getElementById('sequenceCount').textContent =
-    fmtNum(allEmails.length) + ' candidate' + (allEmails.length===1?'':'s') + ' with outreach history';
+  if(activeTab === 'sequences'){
+    document.getElementById('activityCount').textContent =
+      fmtNum(allEmails.length) + ' candidate' + (allEmails.length===1?'':'s') + ' with outreach history';
+  }
 
   const LIMIT = 40;
   const shown = emails.slice(0, LIMIT);
@@ -420,18 +439,22 @@ function renderSequences(){
     }).join('');
   }
 
-  document.getElementById('sequenceFoot').textContent =
-    emails.length > LIMIT ? `Showing latest ${LIMIT} of ${emails.length} matching sequences` : `Showing ${emails.length} sequence${emails.length===1?'':'s'}`;
+  if(activeTab === 'sequences'){
+    document.getElementById('activityFoot').textContent =
+      emails.length > LIMIT ? `Showing latest ${LIMIT} of ${emails.length} matching sequences` : `Showing ${emails.length} sequence${emails.length===1?'':'s'}`;
+  }
 }
 
 function renderSendsTable(){
   const all = window.__sendsLog || [];
-  const q = (document.getElementById('sendsFilter').value || '').toLowerCase().trim();
+  const q = (document.getElementById('activityFilter').value || '').toLowerCase().trim();
   const filtered = q ? all.filter(r =>
     (r.candidateEmail||'').toLowerCase().includes(q) || (r.targetRole||'').toLowerCase().includes(q)
   ) : all;
 
-  document.getElementById('sendsCount').textContent = fmtNum(all.length) + ' total sends logged';
+  if(activeTab === 'sends'){
+    document.getElementById('activityCount').textContent = fmtNum(all.length) + ' total sends logged';
+  }
   const LIMIT = 50;
   const shown = filtered.slice(0, LIMIT);
   const body = document.getElementById('sendsBody');
@@ -452,12 +475,32 @@ function renderSendsTable(){
     `).join('');
   }
 
-  document.getElementById('sendsFoot').textContent =
-    filtered.length > LIMIT ? `Showing latest ${LIMIT} of ${filtered.length} matching sends` : `Showing ${filtered.length} send${filtered.length===1?'':'s'}`;
+  if(activeTab === 'sends'){
+    document.getElementById('activityFoot').textContent =
+      filtered.length > LIMIT ? `Showing latest ${LIMIT} of ${filtered.length} matching sends` : `Showing ${filtered.length} send${filtered.length===1?'':'s'}`;
+  }
 }
 
-document.getElementById('sendsFilter').addEventListener('input', renderSendsTable);
-document.getElementById('sequenceFilter').addEventListener('input', renderSequences);
+// One filter input drives whichever of Recent Sends / Sequences is active --
+// both render functions run on every keystroke (cheap at this data volume)
+// so switching tabs never shows stale filtered results.
+let activeTab = 'sends';
+function setActiveTab(tab){
+  activeTab = tab;
+  document.getElementById('tabBtnSends').classList.toggle('active', tab === 'sends');
+  document.getElementById('tabBtnSequences').classList.toggle('active', tab === 'sequences');
+  document.getElementById('sendsView').style.display = tab === 'sends' ? '' : 'none';
+  document.getElementById('sequencesView').style.display = tab === 'sequences' ? '' : 'none';
+  renderSendsTable();
+  renderSequences();
+}
+document.getElementById('tabBtnSends').addEventListener('click', () => setActiveTab('sends'));
+document.getElementById('tabBtnSequences').addEventListener('click', () => setActiveTab('sequences'));
+
+document.getElementById('activityFilter').addEventListener('input', () => {
+  renderSendsTable();
+  renderSequences();
+});
 loadDashboard();
 setInterval(loadDashboard, REFRESH_MS);
 
