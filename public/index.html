@@ -520,12 +520,48 @@
   .credit-note.err{ color: var(--rust); }
 
   .cc-badge.email-skipped{ border-color: var(--ink-soft); color: var(--ink-soft); font-style: italic; }
+
+  /* ---------- Toasts ---------- */
+  .toast-container{
+    position: fixed; top: 20px; right: 20px; z-index: 1000;
+    display:flex; flex-direction:column; gap:8px; max-width: 340px;
+  }
+  .toast{
+    background: var(--ink); color: var(--paper-raised);
+    font-family:'IBM Plex Sans', sans-serif; font-size: 12.5px; line-height:1.45;
+    padding: 12px 14px; border-radius: var(--radius);
+    box-shadow: var(--card-shadow);
+    border-left: 4px solid var(--teal);
+    opacity: 0; transform: translateX(12px);
+    animation: toast-in 0.2s ease forwards;
+  }
+  .toast.err{ border-left-color: var(--rust); }
+  .toast.info{ border-left-color: var(--amber); }
+  @keyframes toast-in{ to{ opacity:1; transform: translateX(0); } }
+
+  /* ---------- History filter ---------- */
+  .history-filter{
+    margin: 0 18px 10px;
+    font-family:'IBM Plex Sans', sans-serif; font-size: 12px;
+    padding: 7px 10px; background:#FBFAF6; border:1px solid var(--rule); border-radius:2px; color: var(--ink);
+    width: calc(100% - 36px);
+  }
+  .history-filter:focus{ outline:none; border-color: var(--teal); box-shadow: 0 0 0 2px rgba(43,110,99,0.18); }
+
+  /* ---------- Bulk export buttons ---------- */
+  .assign-export-btn{
+    font-family:'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing:0.03em; text-transform: uppercase;
+    padding: 6px 10px; background: transparent; color: var(--ink-soft); border:1px solid var(--rule); border-radius:2px; cursor:pointer;
+  }
+  .assign-export-btn:hover{ color: var(--ink); border-color: var(--ink); }
 </style>
 </head>
 <body>
+<div class="toast-container" id="toastContainer"></div>
 <div class="wrap">
 
   <nav class="suite-nav">
+    <a class="suite-tab" href="/overview.html">Overview</a>
     <a class="suite-tab active" href="/">Sourcing Desk</a>
     <a class="suite-tab" href="/outreach.html">Outreach Control</a>
     <a class="suite-tab" href="/leads.html">Leads Dashboard</a>
@@ -641,6 +677,7 @@
         <div class="stat-cell"><div class="stat-num">—</div><div class="stat-label">Candidates</div></div>
         <div class="stat-cell"><div class="stat-num">—</div><div class="stat-label">Qualified</div></div>
       </div>
+      <input type="text" class="history-filter" id="historyFilter" placeholder="Filter by keyword, location, role context…" />
       <div class="history-list" id="historyList">
         <div class="history-empty">Loading past searches…</div>
       </div>
@@ -720,9 +757,25 @@
     return String(str).replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
   }
 
+  // Additive alongside existing inline error patterns (form-error, ledger
+  // lines) -- for things that don't already have a visible home, like
+  // submit-time credit/team-limit rejections.
+  function showToast(message, type){
+    const container = $("toastContainer");
+    const el = document.createElement("div");
+    el.className = "toast " + (type || "");
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+
   // Tracks which candidates are checked for job assignment, keyed by
   // RecruitCRM slug. Cleared whenever a fresh board is rendered.
   let assignSelection = new Map();
+
+  // Full candidate records for whatever's currently on the board -- needed
+  // for export/copy since assignSelection only stores slug/name/profile URL.
+  let lastRenderedCandidates = [];
 
   function buildCandidateCards(cardsWrap, candidates, assignBar){
     if(candidates && candidates.length){
@@ -840,6 +893,8 @@
         <button type="button" class="assign-mass-btn" data-mass="top20">Select top 20</button>
         <button type="button" class="assign-mass-btn" data-mass="first50">Select first 50</button>
         <button type="button" class="assign-mass-btn" data-mass="none">Clear selection</button>
+        <button type="button" class="assign-export-btn" data-export="csv">Export CSV</button>
+        <button type="button" class="assign-export-btn" data-export="emails">Copy emails</button>
       </div>
       <div class="assign-bar-row">
         <input type="text" class="assign-job-input" placeholder="RecruitCRM job name (optional)" value="${escapeHtml(defaultJob || "")}" />
@@ -880,6 +935,50 @@
         });
         updateAssignBar(bar);
       });
+    });
+
+    // Selection-scoped export/copy -- falls back to every candidate
+    // currently on the board when nothing's checked, since "export what I'm
+    // looking at" is the more common intent than "export nothing."
+    function selectedOrAllCandidates(){
+      if(assignSelection.size === 0) return lastRenderedCandidates;
+      const slugs = new Set(assignSelection.keys());
+      return lastRenderedCandidates.filter(c => c.recruitcrm_slug && slugs.has(c.recruitcrm_slug));
+    }
+
+    function csvCell(v){
+      const s = String(v == null ? "" : v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }
+
+    bar.querySelector('[data-export="csv"]').addEventListener("click", () => {
+      const rows = selectedOrAllCandidates();
+      if(!rows.length){ statusEl.className = "assign-status err"; statusEl.textContent = "Nothing to export."; return; }
+      const cols = ["name", "current_role", "current_company", "location", "email", "fit_score", "public_profile_url"];
+      const header = ["Name", "Current Role", "Company", "Location", "Email", "Fit Score", "Profile URL"];
+      const lines = [header.join(",")].concat(rows.map(r => cols.map(c => csvCell(r[c])).join(",")));
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `candidates-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      statusEl.className = "assign-status ok";
+      statusEl.textContent = `Exported ${rows.length} candidate${rows.length === 1 ? "" : "s"} to CSV.`;
+    });
+
+    bar.querySelector('[data-export="emails"]').addEventListener("click", async () => {
+      const rows = selectedOrAllCandidates();
+      const emails = rows.map(r => r.email).filter(e => e && e !== "Not found");
+      if(!emails.length){ statusEl.className = "assign-status err"; statusEl.textContent = "No enriched emails in the current selection."; return; }
+      try{
+        await navigator.clipboard.writeText(emails.join(", "));
+        statusEl.className = "assign-status ok";
+        statusEl.textContent = `Copied ${emails.length} email${emails.length === 1 ? "" : "s"} to clipboard.`;
+      } catch(err){
+        statusEl.className = "assign-status err";
+        statusEl.textContent = "Couldn't copy to clipboard: " + err.message;
+      }
     });
 
     btn.addEventListener("click", async () => {
@@ -953,6 +1052,7 @@
   }
 
   function renderResults(candidates, summary, totalFoundOnLinkedIn){
+    lastRenderedCandidates = candidates || [];
     const wrap = document.createElement("div");
 
     if(totalFoundOnLinkedIn){
@@ -989,6 +1089,7 @@
   // Shows candidates already pooled for a past search, pulled from the
   // sheet-overview payload — no workflow run, just browsing history.
   function renderHistoryCandidates(item){
+    lastRenderedCandidates = item.candidates || [];
     board.innerHTML = "";
     const wrap = document.createElement("div");
 
@@ -1058,6 +1159,7 @@
     } catch(err){
       ledgerLine("Could not start the workflow: " + err.message, "err");
       setStatus("err", "Failed to start");
+      showToast(err.message, "err");
       loadCredits();
       return;
     }
@@ -1189,6 +1291,20 @@
     });
   }
 
+  let lastHistory = [];
+  const historyFilter = $("historyFilter");
+
+  function applyHistoryFilter(){
+    const q = historyFilter.value.trim().toLowerCase();
+    if(!q){ renderHistory(lastHistory); return; }
+    const filtered = lastHistory.filter(item =>
+      (item.searchString || "").toLowerCase().includes(q) ||
+      (item.location || "").toLowerCase().includes(q) ||
+      (item.roleContext || "").toLowerCase().includes(q)
+    );
+    renderHistory(filtered);
+  }
+
   async function loadHistory(){
     historyList.innerHTML = '<div class="history-empty">Loading past searches…</div>';
     try{
@@ -1196,12 +1312,15 @@
       const data = await res.json();
       if(!res.ok || data.error) throw new Error(data.error || "Failed to load sheet data.");
       renderStats(data.totals || {});
-      renderHistory(data.history || []);
+      lastHistory = data.history || [];
+      applyHistoryFilter();
     } catch(err){
       historyList.innerHTML = `<div class="history-empty">Couldn't load sheet data: ${escapeHtmlShort(err.message)}</div>`;
+      showToast("Couldn't load sourcing history: " + err.message, "err");
     }
   }
 
+  historyFilter.addEventListener("input", applyHistoryFilter);
   $("historyRefresh").addEventListener("click", loadHistory);
   loadHistory();
 

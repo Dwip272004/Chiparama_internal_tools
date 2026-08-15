@@ -21,6 +21,7 @@ const {
   CANDIDATES_TAB = "Candidates",
   SUPABASE_URL = "https://ewbpejxknkagwxhceavx.supabase.co",   // "Chiparama Sourcing Desk" project
   SUPABASE_ANON_KEY = "sb_publishable_MPL4a2rIFziptvf1k8WN9Q_WUwarTxm", // publishable key -- safe to default, not a secret
+  N8N_INTERNAL_KEY, // shared secret for n8n -> server.js internal writes -- set this on Render, no default
 
   // ---- Credit system: every threshold below is a config value, meant to be
   // tuned (raised, mostly) once real usage has been watched for a while
@@ -152,17 +153,139 @@ app.get("/api/auth/session", async (req, res) => {
 });
 
 // Gate every page and every other /api/* route behind a valid Supabase
-// session -- only the login page and the auth endpoints themselves stay open.
+// session -- the login page, the auth endpoints, and the internal n8n<->server
+// routes (which have no browser session at all, see requireInternalKey below)
+// are the only things that stay open here.
 app.use((req, res, next) => {
-  if (req.path === "/login.html" || req.path.startsWith("/api/auth/")) return next();
+  if (req.path === "/login.html" || req.path.startsWith("/api/auth/") || req.path.startsWith("/api/internal/")) return next();
   return requireAuth(req, res, next);
 });
 
 app.use(express.static(path.join(__dirname, "public")));
 
+/**
+ * Guards the /api/internal/* routes n8n calls directly (no browser, no
+ * Supabase session -- server-to-server). A shared secret, not real auth;
+ * the actual Supabase writes happen through SECURITY DEFINER RPCs that
+ * don't check auth.uid() for exactly this reason. Mirrors how the browser
+ * never sees the Supabase key -- here, n8n never sees it either.
+ */
+function requireInternalKey(req, res, next) {
+  if (!N8N_INTERNAL_KEY) {
+    return res.status(500).json({ error: "N8N_INTERNAL_KEY is not configured on the server." });
+  }
+  if (req.headers["x-internal-key"] !== N8N_INTERNAL_KEY) {
+    return res.status(401).json({ error: "Invalid or missing internal key." });
+  }
+  next();
+}
+
 function n8nHeaders() {
   return { "X-N8N-API-KEY": N8N_API_KEY, accept: "application/json" };
 }
+
+// ---- Internal routes: n8n -> server.js -> Supabase ----
+// Replaces the workflow's old Google Sheets writes ("Log Search Request",
+// "Append Candidate to Sheet", "Read Candidates for Summary"). server.js is
+// the only thing holding the Supabase key -- n8n only ever calls its own
+// server, same trust boundary as the browser never seeing the n8n API key.
+
+app.post("/api/internal/search-requests", requireInternalKey, async (req, res) => {
+  try {
+    const f = req.body || {};
+    const { data, error } = await supabase.rpc("insert_search_request", {
+      p_boolean_search_string: f.booleanSearchString || null,
+      p_location_region: f.locationRegion || null,
+      p_role_context: f.roleContext || null,
+      p_role_keywords: f.roleKeywords || null,
+      p_skills_keywords: f.skillsKeywords || null,
+      p_min_years_experience: f.minYearsExperience || null,
+      p_seniority_level: f.seniorityLevel || null,
+      p_network_distance: f.networkDistance || null,
+      p_spotlights: f.spotlights || null,
+      p_recruit_crm_job: f.recruitCrmJob || null,
+      p_requester_email: f.requesterEmail || null,
+      p_submitted_at: f.submittedAt || new Date().toISOString()
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/internal/candidates", requireInternalKey, async (req, res) => {
+  try {
+    const c = req.body || {};
+    if (!c.public_profile_url) {
+      return res.status(400).json({ error: "public_profile_url is required." });
+    }
+    const { data, error } = await supabase.rpc("upsert_candidate", {
+      p_search_request_id: c.search_request_id || null,
+      p_global_index: c._global_index ?? c.global_index ?? null,
+      p_name: c.name || null,
+      p_headline: c.headline || null,
+      p_location: c.location || null,
+      p_current_title: c.current_role || null,
+      p_current_company: c.current_company || null,
+      p_public_profile_url: c.public_profile_url,
+      p_talent_profile_url: c.talent_profile_url || null,
+      p_network_distance: c.network_distance || null,
+      p_email: c.email || null,
+      p_email_status: c.email_status || null,
+      p_fit_score: c.fit_score ?? null,
+      p_ai_summary: c.ai_summary || null,
+      p_matched_signals: c.matched_signals || null,
+      p_gaps: c.gaps || null,
+      p_sourced_at: c.sourced_at || new Date().toISOString(),
+      p_recruitcrm_slug: c.recruitcrm_slug || null,
+      p_linkedin_total_found: c.linkedin_total_found ?? null,
+      p_search_keywords: c.search_keywords || null,
+      p_skills: c.skills || null,
+      p_seniority: c.seniority || null,
+      p_industry: c.industry || null,
+      p_connections_count: c.connections_count ?? null,
+      p_profile_picture_url: c.profile_picture_url || null,
+      p_certifications: c.certifications || null,
+      p_projects: c.projects || null,
+      p_languages: c.languages || null,
+      p_employment_history: c.employment_history || null,
+      p_organization_name: c.organization_name || null,
+      p_organization_industry: c.organization_industry || null,
+      p_organization_employee_count: c.organization_employee_count ?? null,
+      p_organization_website: c.organization_website || null,
+      p_organization_linkedin_url: c.organization_linkedin_url || null,
+      p_organization_phone: c.organization_phone || null,
+      p_organization_description: c.organization_description || null,
+      p_twitter_url: c.twitter_url || null,
+      p_github_url: c.github_url || null,
+      p_linkedin_raw: c.linkedin_raw || null,
+      p_apollo_raw: c.apollo_raw || null,
+      p_seamless_raw: c.seamless_raw || null
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ id: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Replaces "Read Candidates for Summary" -- scoped to just this run's
+// candidates via search_request_id, instead of re-reading everything and
+// matching by keyword string (which the old sheet-based approach had to do).
+app.get("/api/internal/candidates", requireInternalKey, async (req, res) => {
+  try {
+    const searchRequestId = req.query.search_request_id;
+    if (!searchRequestId) return res.status(400).json({ error: "search_request_id is required." });
+    const { data, error } = await supabase.rpc("get_candidates_for_search", {
+      p_search_request_id: searchRequestId
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ candidates: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ---- Credit system helpers ----
 
@@ -340,12 +463,15 @@ app.post("/api/submit", async (req, res) => {
       "networkDistance",     // field-7
       "spotlights",          // field-8
       "recruitCrmJob",       // field-9
-      "emailCreditBudget"    // field-10 -- caps how many candidates get Apollo/Seamless enrichment this run
+      "emailCreditBudget",   // field-10 -- caps how many candidates get Apollo/Seamless enrichment this run
+      "requesterEmail"       // field-11 -- whoever's signed in, so the completion email always reaches them
     ];
 
     const form = new FormData();
     FIELD_ORDER.forEach((key, i) => {
-      const value = key === "emailCreditBudget" ? emailBudget : fields[key];
+      const value = key === "emailCreditBudget" ? emailBudget
+        : key === "requesterEmail" ? (req.user && req.user.email)
+        : fields[key];
       form.append(`field-${i}`, value !== undefined && value !== null ? String(value) : "");
     });
 

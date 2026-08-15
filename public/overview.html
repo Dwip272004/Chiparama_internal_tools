@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Overview — Sourcing Desk</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+  :root{
+    --paper: #E7E3D8;
+    --paper-raised: #F1EEE4;
+    --ink: #23261F;
+    --ink-soft: #5B5A4D;
+    --rule: #C9C3AF;
+    --teal: #2B6E63;
+    --teal-deep: #1D4B43;
+    --amber: #B9822F;
+    --rust: #9C4A3A;
+    --card-shadow: 0 1px 0 rgba(35,38,31,0.06), 0 8px 20px -12px rgba(35,38,31,0.35);
+    --radius: 3px;
+  }
+
+  *{ box-sizing: border-box; }
+
+  body{
+    margin:0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before{
+    content:"";
+    position: fixed; inset:0;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(35,38,31,0.015) 0px, rgba(35,38,31,0.015) 1px, transparent 1px, transparent 3px);
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .wrap{
+    position:relative;
+    z-index:1;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 28px 80px;
+  }
+
+  header.masthead{
+    display:flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+    margin-bottom: 34px;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--teal-deep);
+    text-transform: uppercase;
+    margin: 0 0 6px;
+  }
+  h1.title{
+    font-family:'Roboto Slab', Georgia, serif;
+    font-weight: 700;
+    font-size: clamp(28px, 4vw, 40px);
+    margin:0;
+    letter-spacing: -0.01em;
+  }
+  .masthead-meta{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.6;
+  }
+
+  .card{
+    background: var(--paper-raised);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: var(--card-shadow);
+  }
+
+  .panel-grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+  }
+  .panel{
+    padding: 20px 22px;
+  }
+  .panel h2{
+    font-family:'Roboto Slab', Georgia, serif;
+    font-size: 15px; margin: 0 0 2px; font-weight: 600;
+  }
+  .panel-sub{ font-size: 11px; color: var(--ink-soft); margin-bottom: 16px; }
+
+  .stat-row{ display:flex; gap: 18px; flex-wrap: wrap; }
+  .stat{ flex: 1; min-width: 90px; }
+  .stat .num{
+    font-family:'Roboto Slab', serif; font-weight:700; font-size: 28px; color: var(--teal-deep);
+    line-height:1.1;
+  }
+  .stat .num.warn{ color: var(--amber); }
+  .stat .num.crit{ color: var(--rust); }
+  .stat .lbl{ font-size: 10px; color: var(--ink-soft); text-transform: uppercase; letter-spacing:0.05em; margin-top:4px; }
+
+  .panel-link{
+    display:inline-block; margin-top: 14px;
+    font-family:'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.04em;
+    color: var(--teal-deep); text-decoration: none;
+  }
+  .panel-link:hover{ text-decoration: underline; }
+
+  .panel-note{ font-size: 11.5px; color: var(--ink-soft); line-height:1.5; margin-top: 4px; }
+
+  .loading{ color: var(--ink-soft); font-size: 12px; }
+
+  /* ---------- Suite nav ---------- */
+  .suite-nav{
+    display:flex; gap:8px; margin-bottom: 22px; flex-wrap:wrap;
+  }
+  .suite-tab{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 7px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 20px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    background: var(--paper-raised);
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .suite-tab:hover{ color: var(--ink); border-color: var(--teal); }
+  .suite-tab.active{ background: var(--ink); color: var(--paper-raised); border-color: var(--ink); }
+  .suite-tab.signout{ margin-left: auto; background: none; cursor: pointer; }
+  .suite-tab.signout:hover{ color: var(--rust); border-color: var(--rust); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="suite-nav">
+    <a class="suite-tab active" href="/overview.html">Overview</a>
+    <a class="suite-tab" href="/">Sourcing Desk</a>
+    <a class="suite-tab" href="/outreach.html">Outreach Control</a>
+    <a class="suite-tab" href="/leads.html">Leads Dashboard</a>
+    <button type="button" class="suite-tab signout" id="signOutBtn">Sign out</button>
+  </nav>
+
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">Talent Sourcing / Internal Tool</p>
+      <h1 class="title">Overview</h1>
+    </div>
+    <div class="masthead-meta" id="updatedAt">Loading…</div>
+  </header>
+
+  <div class="panel-grid">
+
+    <section class="card panel">
+      <h2>Sourcing</h2>
+      <div class="panel-sub">All-time, pulled from the Candidates sheet</div>
+      <div class="stat-row" id="sourcingStats">
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Searches</div></div>
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Candidates</div></div>
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Qualified</div></div>
+      </div>
+      <a class="panel-link" href="/">Open Sourcing Desk →</a>
+    </section>
+
+    <section class="card panel">
+      <h2>Team LinkedIn usage</h2>
+      <div class="panel-sub" id="teamUsageSub">Shared seat, resets daily</div>
+      <div class="stat-row" id="teamStats">
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Searches today</div></div>
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Candidates touched</div></div>
+      </div>
+    </section>
+
+    <section class="card panel">
+      <h2>Outreach</h2>
+      <div class="panel-sub">Live from the Outreach Log</div>
+      <div class="stat-row" id="outreachStats">
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Jobs active</div></div>
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Sent today</div></div>
+        <div class="stat"><div class="num loading">—</div><div class="lbl">Reply rate</div></div>
+      </div>
+      <a class="panel-link" href="/outreach.html">Open Outreach Control →</a>
+    </section>
+
+    <section class="card panel">
+      <h2>Leads</h2>
+      <div class="panel-sub" id="leadsSub">Manual snapshot — no live count here</div>
+      <div class="panel-note">The Leads Dashboard is currently a manually-embedded snapshot rather than a live feed, so its numbers don't appear on this overview. Open it directly for the latest data it has.</div>
+      <a class="panel-link" href="/leads.html">Open Leads Dashboard →</a>
+    </section>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  function fmtNum(n){ return (n == null ? '—' : Math.floor(n).toLocaleString()); }
+
+  function setStat(containerId, index, value, cls){
+    const cells = document.getElementById(containerId).querySelectorAll('.num');
+    const el = cells[index];
+    el.textContent = value;
+    el.className = 'num' + (cls ? ' ' + cls : '');
+  }
+
+  async function loadSourcing(){
+    try{
+      const res = await fetch('/api/sheet-overview');
+      const data = await res.json();
+      if(!res.ok || data.error) throw new Error(data.error || 'Failed to load.');
+      const t = data.totals || {};
+      setStat('sourcingStats', 0, fmtNum(t.totalSearches));
+      setStat('sourcingStats', 1, fmtNum(t.totalCandidatesPooled));
+      setStat('sourcingStats', 2, fmtNum(t.totalQualified));
+    } catch(err){
+      ['sourcingStats'].forEach(id => {
+        document.getElementById(id).querySelectorAll('.num').forEach(el => { el.textContent = '—'; });
+      });
+    }
+  }
+
+  async function loadTeamUsage(){
+    try{
+      const res = await fetch('/api/credits');
+      const data = await res.json();
+      if(!res.ok || data.error) throw new Error(data.error || 'Failed to load.');
+      const t = data.team || {};
+      const searchesCls = t.searchesUsedToday >= t.maxSearchesPerDay ? 'crit' : t.searchesUsedToday >= t.maxSearchesPerDay * 0.75 ? 'warn' : '';
+      const candCls = t.candidatesTouchedToday >= t.maxCandidatesPerDay ? 'crit' : t.candidatesTouchedToday >= t.maxCandidatesPerDay * 0.75 ? 'warn' : '';
+      setStat('teamStats', 0, fmtNum(t.searchesUsedToday) + ' / ' + fmtNum(t.maxSearchesPerDay), searchesCls);
+      setStat('teamStats', 1, fmtNum(t.candidatesTouchedToday) + ' / ' + fmtNum(t.maxCandidatesPerDay), candCls);
+      if(t.dayResetsAt){
+        document.getElementById('teamUsageSub').textContent = 'Resets ' + new Date(t.dayResetsAt).toLocaleString();
+      }
+    } catch(err){
+      document.getElementById('teamUsageSub').textContent = 'Team usage unavailable: ' + err.message;
+    }
+  }
+
+  async function loadOutreach(){
+    try{
+      const res = await fetch('https://diwp645.app.n8n.cloud/webhook/chiparama-dashboard-metrics', { cache: 'no-store' });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+
+      const log = Array.isArray(data.outreachLog) ? data.outreachLog : [];
+      const byJob = Array.isArray(data.byJob) ? data.byJob : [];
+
+      const todayStr = new Date().toISOString().slice(0,10);
+      const sentToday = log.filter(r => r.sentAt && String(r.sentAt).slice(0,10) === todayStr).length;
+      const knownReplies = log.filter(r => typeof r.replied === 'boolean');
+      const repliedCount = knownReplies.filter(r => r.replied).length;
+      const replyRate = knownReplies.length ? ((repliedCount / knownReplies.length) * 100).toFixed(1) + '%' : '—';
+
+      setStat('outreachStats', 0, fmtNum(byJob.length));
+      setStat('outreachStats', 1, fmtNum(sentToday));
+      setStat('outreachStats', 2, replyRate);
+    } catch(err){
+      document.getElementById('outreachStats').querySelectorAll('.num').forEach(el => { el.textContent = '—'; });
+    }
+  }
+
+  Promise.allSettled([loadSourcing(), loadTeamUsage(), loadOutreach()]).finally(() => {
+    document.getElementById('updatedAt').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  });
+
+  document.getElementById('signOutBtn').addEventListener('click', async () => {
+    try{ await fetch('/api/auth/logout', { method: 'POST' }); } catch(err){ /* ignore, redirect anyway */ }
+    window.location.href = '/login.html';
+  });
+})();
+</script>
+</body>
+</html>
