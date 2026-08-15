@@ -287,6 +287,140 @@ app.get("/api/internal/candidates", requireInternalKey, async (req, res) => {
   }
 });
 
+// ---- Internal routes: outreach automation workflows -> server.js -> Supabase ----
+// Replaces the 3 n8n Data Tables (Outreach Log, Candidate Stage Tracker,
+// Templates) the 7 outreach workflows used to read/write directly. Same
+// trust boundary as the Sourcing Desk routes above: n8n calls server.js,
+// server.js is the only thing holding the Supabase key, writes go through
+// SECURITY DEFINER RPCs.
+
+app.post("/api/internal/outreach-log", requireInternalKey, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { data, error } = await supabase.rpc("insert_outreach_log", {
+      p_candidate_id: b.candidateId || null,
+      p_candidate_email: b.candidateEmail || null,
+      p_template_id: b.templateId ?? null,
+      p_sent_at: b.sentAt || new Date().toISOString(),
+      p_target_role: b.targetRole || null
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ row: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/internal/outreach-log", requireInternalKey, async (req, res) => {
+  try {
+    const rows = await fetchAllRows(supabase, "outreach_log");
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch("/api/internal/outreach-log", requireInternalKey, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.candidateEmail) return res.status(400).json({ error: "candidateEmail is required." });
+    const { data, error } = await supabase.rpc("update_outreach_log_replied", {
+      p_candidate_email: b.candidateEmail
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ rows: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/internal/stage-tracker", requireInternalKey, async (req, res) => {
+  try {
+    const { candidateId, jobId } = req.query;
+    if (candidateId && jobId) {
+      const { data, error } = await supabase
+        .from("candidate_stage_tracker")
+        .select("*")
+        .eq("candidate_id", candidateId)
+        .eq("job_id", jobId)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ row: data || null });
+    }
+    const rows = await fetchAllRows(supabase, "candidate_stage_tracker");
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/internal/stage-tracker", requireInternalKey, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.candidateId) return res.status(400).json({ error: "candidateId is required." });
+    const { data, error } = await supabase.rpc("upsert_stage_tracker", {
+      p_candidate_id: b.candidateId,
+      p_job_id: b.jobId || null,
+      p_last_known_stage: b.lastKnownStage || null,
+      p_last_template_sent: b.lastTemplateSent ?? null,
+      p_last_checked_at: b.lastCheckedAt || new Date().toISOString()
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ row: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/internal/templates", requireInternalKey, async (req, res) => {
+  try {
+    const { templateId, recruitCrmStage } = req.query;
+    if (templateId !== undefined) {
+      const { data, error } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("template_id", templateId)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ row: data || null });
+    }
+    if (recruitCrmStage !== undefined) {
+      const { data, error } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("recruit_crm_stage", recruitCrmStage)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json({ row: data || null });
+    }
+    const rows = await fetchAllRows(supabase, "templates");
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/internal/templates", requireInternalKey, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.templateId === undefined || b.templateId === null) return res.status(400).json({ error: "templateId is required." });
+    const { data, error } = await supabase.rpc("upsert_template", {
+      p_template_id: b.templateId,
+      p_template_name: b.templateName || null,
+      p_phase: b.phase || null,
+      p_trigger_type: b.triggerType || null,
+      p_subject: b.subject || null,
+      p_body: b.body || null,
+      p_placeholders_used: b.placeholdersUsed || null,
+      p_recruit_crm_stage: b.recruitCrmStage || null
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ row: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- Credit system helpers ----
 
 // Tracks an email-credit reservation from /api/submit through to the
