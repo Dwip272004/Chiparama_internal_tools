@@ -177,6 +177,8 @@
   .seq-date{ font-size: 9.5px; color: var(--text-faint); font-family:'IBM Plex Mono', monospace; }
   .seq-replied-badge{ font-size: 8.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
   .seq-arrow{ color: var(--text-faint); font-size: 14px; flex: none; }
+  .seq-link.stage{ background: #fff; border-color: var(--text-dim); border-style: dashed; }
+  .seq-stage{ font-family:'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 600; color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -346,20 +348,27 @@ function render(data){
   window.__sendsLog = log.slice().sort((a,b) => new Date(b.sentAt||0) - new Date(a.sentAt||0));
   renderSendsTable();
 
-  window.__sequencesByEmail = buildSequences(log);
+  const stageHistory = Array.isArray(data.stageHistory) ? data.stageHistory : [];
+  window.__sequencesByEmail = buildSequences(log, stageHistory);
   renderSequences();
 }
 
-// Groups the flat outreach log into one chronological chain per candidate --
-// same source data as the Recent Sends table, just organized to answer
-// "what's the full history with this person" instead of "what happened most
-// recently across everyone."
-function buildSequences(log){
+// Groups the flat outreach log AND the stage-change history into one
+// chronological chain per candidate -- email touches and RecruitCRM stage
+// transitions interleaved by time, so the chain reads as the real story
+// ("Applied -> [email] -> Screening Invite -> [email] -> replied") instead
+// of just the email half of it.
+function buildSequences(log, stageHistory){
   const byEmail = {};
   log.forEach(r => {
     const email = r.candidateEmail || 'Unknown';
     if(!byEmail[email]) byEmail[email] = [];
-    byEmail[email].push(r);
+    byEmail[email].push(Object.assign({type: 'email'}, r));
+  });
+  (stageHistory || []).forEach(r => {
+    const email = r.candidateEmail || 'Unknown';
+    if(!byEmail[email]) return; // no outreach history for this candidate -- out of scope for Sequences
+    byEmail[email].push(Object.assign({type: 'stage'}, r, {sentAt: r.changedAt}));
   });
   Object.values(byEmail).forEach(touches => touches.sort((a,b) => new Date(a.sentAt||0) - new Date(b.sentAt||0)));
   return byEmail;
@@ -390,9 +399,14 @@ function renderSequences(){
     emptyMsg.style.display = 'none';
     list.innerHTML = shown.map(email => {
       const touches = byEmail[email];
-      const role = touches[touches.length-1].targetRole || '';
+      const lastEmailTouch = touches.slice().reverse().find(t => t.type === 'email');
+      const role = (lastEmailTouch && lastEmailTouch.targetRole) || '';
       const chain = touches.map((t, i) => {
         const arrow = i > 0 ? '<span class="seq-arrow">→</span>' : '';
+        if(t.type === 'stage'){
+          const label = t.fromStage ? `${t.fromStage} → ${t.toStage}` : `${t.toStage}`;
+          return `${arrow}<div class="seq-link stage"><span class="seq-stage">${escapeHtml(label)}</span><span class="seq-date">${fmtDate(t.sentAt)}</span></div>`;
+        }
         const repliedCls = t.replied ? ' replied' : '';
         const badge = t.replied ? '<span class="seq-replied-badge">Replied</span>' : '';
         return `${arrow}<div class="seq-link${repliedCls}"><span class="seq-template">Template ${escapeHtml(t.templateId ?? '?')}</span><span class="seq-date">${fmtDate(t.sentAt)}</span>${badge}</div>`;

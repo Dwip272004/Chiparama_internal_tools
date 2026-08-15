@@ -421,6 +421,34 @@ app.post("/api/internal/templates", requireInternalKey, async (req, res) => {
   }
 });
 
+app.post("/api/internal/stage-history", requireInternalKey, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.candidateId) return res.status(400).json({ error: "candidateId is required." });
+    const { data, error } = await supabase.rpc("insert_stage_change", {
+      p_candidate_id: b.candidateId,
+      p_job_id: b.jobId || null,
+      p_from_stage: b.fromStage || null,
+      p_to_stage: b.toStage || null,
+      p_template_sent: b.templateSent ?? null,
+      p_changed_at: b.changedAt || new Date().toISOString()
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ row: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/internal/stage-history", requireInternalKey, async (req, res) => {
+  try {
+    const rows = await fetchAllRows(supabase, "stage_change_history");
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- Credit system helpers ----
 
 // Tracks an email-credit reservation from /api/submit through to the
