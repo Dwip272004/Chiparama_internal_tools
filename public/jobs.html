@@ -186,7 +186,11 @@
   }
   .pipeline-job-detail .jd-title{ font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:15px; color:var(--text); margin-bottom:6px; }
   .pipeline-job-detail .jd-meta{ display:flex; flex-wrap:wrap; gap:12px; margin-bottom:8px; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-dim); }
-  .pipeline-job-detail .jd-desc{ font-size:11.5px; line-height:1.55; color:var(--text-dim); max-height:110px; overflow-y:auto; }
+  .pipeline-job-detail .jd-desc{ font-size:11.5px; line-height:1.55; color:var(--text-dim); max-height:220px; overflow-y:auto; }
+  .pipeline-job-detail .jd-desc p{ margin:0 0 8px 0; }
+  .pipeline-job-detail .jd-desc ul, .pipeline-job-detail .jd-desc ol{ margin:0 0 8px 0; padding-left:18px; }
+  .pipeline-job-detail .jd-desc li{ margin-bottom:3px; }
+  .pipeline-job-detail .jd-desc b, .pipeline-job-detail .jd-desc strong{ color:var(--text); }
   @media (max-width:900px){
     .pipeline-grid{ grid-template-columns: 1fr; }
   }
@@ -271,6 +275,42 @@ function fmtDate(v){
   if(isNaN(dt)) return String(v);
   return dt.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
 }
+// RecruitCRM job descriptions come back as HTML (<p>, <b>, <ul>, <li>, ...),
+// not plain text -- rendering them through escapeHtml() would just show the
+// raw tags. This parses the string inertly (a detached <template> never
+// executes scripts or fires event handlers) then rebuilds it keeping only a
+// small allowlist of formatting tags with every attribute stripped, so
+// nothing from an external API response (event handlers, javascript: hrefs,
+// <script>/<style>/<iframe>) can end up live in the page.
+function sanitizeJobDescription(html){
+  const KEEP = new Set(['P','B','STRONG','I','EM','UL','OL','LI','BR','SPAN']);
+  const DROP_ENTIRELY = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META']);
+  const template = document.createElement('template');
+  template.innerHTML = String(html || '');
+
+  function clean(parent){
+    Array.from(parent.childNodes).forEach(node => {
+      if(node.nodeType === Node.ELEMENT_NODE){
+        if(DROP_ENTIRELY.has(node.tagName)){
+          node.remove();
+        }else if(KEEP.has(node.tagName)){
+          Array.from(node.attributes).forEach(attr => node.removeAttribute(attr.name));
+          clean(node);
+        }else{
+          // Unknown/unsafe wrapper tag (e.g. a stray <a>, <img>, <div> with
+          // attributes) -- keep its text content, drop the tag itself.
+          while(node.firstChild) parent.insertBefore(node.firstChild, node);
+          node.remove();
+        }
+      }else if(node.nodeType !== Node.TEXT_NODE){
+        node.remove(); // comments, processing instructions, etc.
+      }
+    });
+  }
+  clean(template.content);
+  return template.innerHTML;
+}
+
 function fmtSalary(job){
   if(job.minSalary == null && job.maxSalary == null) return '';
   const fmt = n => '$' + Number(n).toLocaleString();
@@ -372,7 +412,7 @@ function renderJobDetail(job){
   detail.innerHTML = `
     <div class="jd-title">${escapeHtml(job.name)}</div>
     <div class="jd-meta">${meta.map(m => `<span>${escapeHtml(m)}</span>`).join('')}</div>
-    ${job.description ? `<div class="jd-desc">${escapeHtml(job.description)}</div>` : ''}
+    ${job.description ? `<div class="jd-desc">${sanitizeJobDescription(job.description)}</div>` : ''}
   `;
   detail.style.display = '';
 }
