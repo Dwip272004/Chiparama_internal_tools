@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chiparama Job Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#E7E3D8;
+    --panel:#F1EEE4;
+    --border:#C9C3AF;
+    --text:#23261F;
+    --text-dim:#6E6A5B;
+    --text-faint:#9A947F;
+    --teal-bg:rgba(43,110,99,0.1);
+    --teal:#1D4B43;
+    --amber:#B9822F;
+    --amber-bg:rgba(185,130,47,0.12);
+    --red:#9C4A3A;
+    --red-bg:rgba(156,74,58,0.1);
+    --radius:3px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    min-height:100vh;
+    padding:40px 28px 60px;
+  }
+  .wrap{ max-width:1180px; margin:0 auto; }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+
+  .header{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    border-bottom:2px solid var(--text); padding-bottom:18px; margin-bottom:26px;
+    flex-wrap:wrap; gap:14px;
+  }
+  .eyebrow{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em;
+    color:var(--text-dim); text-transform:uppercase; margin-bottom:8px;
+  }
+  h1{
+    font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:36px;
+    margin:0; color:var(--text); letter-spacing:-0.01em;
+  }
+  .header-meta{ text-align:right; }
+  .header-meta .runs{ font-size:12.5px; color:var(--text-dim); margin-bottom:6px; }
+  .header-meta .runs b{ color:var(--text); font-weight:600; }
+  .live-pill{
+    display:inline-flex; align-items:center; gap:6px; font-family:'IBM Plex Mono',monospace;
+    font-size:11px; letter-spacing:.08em; color:var(--teal); background:var(--teal-bg);
+    padding:4px 10px; border-radius:20px;
+  }
+  .dot{ width:6px;height:6px;border-radius:50%; background:var(--teal); animation:pulse 2.2s infinite; }
+  @keyframes pulse{ 0%{opacity:1;} 50%{opacity:.35;} 100%{opacity:1;} }
+  .updated{ font-size:11px; color:var(--text-faint); margin-top:6px; font-family:'IBM Plex Mono',monospace; }
+
+  section.panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px 20px; margin-bottom:14px;
+  }
+  section.panel h2{
+    font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:16px;
+    margin:0 0 2px 0; color:var(--text);
+  }
+  .panel-sub{ font-size:11.5px; color:var(--text-dim); margin-bottom:12px; }
+
+  .table-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; gap:10px; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  thead th{
+    text-align:left; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-faint);
+    font-weight:600; padding:0 10px 8px 0; border-bottom:1px solid var(--border);
+  }
+  tbody td{ padding:6px 10px 6px 0; border-bottom:1px dashed var(--border); vertical-align:middle; }
+  tbody tr:last-child td{ border-bottom:none; }
+  td.role{ color:var(--text-dim); max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pill{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; padding:2px 7px; border-radius:9px; }
+  .pill.sends{ background:var(--teal-bg); color:var(--teal); }
+  .empty-note{ color:var(--text-faint); font-size:13px; padding:14px 0; }
+
+  .footer{
+    display:flex; align-items:center; justify-content:space-between; font-size:11.5px;
+    color:var(--text-faint); font-family:'IBM Plex Mono',monospace; margin-top:6px; flex-wrap:wrap; gap:8px;
+  }
+
+  @media (max-width:720px){
+    .header{ flex-direction:column; align-items:flex-start; }
+    .header-meta{ text-align:left; }
+  }
+
+  /* ---------- Suite nav ---------- */
+  .suite-nav{
+    display:flex; gap:8px; margin-bottom: 22px; flex-wrap:wrap;
+  }
+  .suite-tab{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-dim);
+    text-decoration: none;
+    background: var(--panel);
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+  .suite-tab:hover{ color: var(--text); border-color: var(--teal); }
+  .suite-tab.active{ background: var(--text); color: var(--panel); border-color: var(--text); }
+  .suite-tab.signout{ margin-left: auto; background: none; cursor: pointer; }
+  .suite-tab.signout:hover{ color: var(--red); border-color: var(--red); }
+
+  /* ---------- Toasts ---------- */
+  .toast-container{
+    position: fixed; top: 20px; right: 20px; z-index: 1000;
+    display:flex; flex-direction:column; gap:8px; max-width: 340px;
+  }
+  .toast{
+    background: var(--text); color: var(--panel);
+    font-family:'IBM Plex Sans', sans-serif; font-size: 12.5px; line-height:1.45;
+    padding: 12px 14px; border-radius: var(--radius);
+    box-shadow: 0 1px 0 rgba(35,38,31,0.06), 0 8px 20px -12px rgba(35,38,31,0.35);
+    border-left: 4px solid var(--teal);
+    opacity: 0; transform: translateX(12px);
+    animation: toast-in 0.2s ease forwards;
+  }
+  .toast.err{ border-left-color: var(--red); }
+  .toast.info{ border-left-color: var(--amber); }
+  @keyframes toast-in{ to{ opacity:1; transform: translateX(0); } }
+
+  /* ---------- Job Pipeline (live RecruitCRM browser) ---------- */
+  /* min-width:0 is required on grid items that contain a table -- grid items
+     default to min-width:auto, so a 1fr track otherwise refuses to shrink
+     below the table's intrinsic width and the content bleeds past the panel
+     edge instead of wrapping/scrolling inside it. */
+  .pipeline-grid{ display:grid; grid-template-columns: 280px 1fr; gap:14px; align-items:start; min-width:0; }
+  .pipeline-grid > *{ min-width:0; }
+  .pipeline-candidates{ overflow-x:auto; }
+  .pipeline-jobs{ max-height:640px; overflow-y:auto; }
+  .pipeline-job-item{
+    padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius);
+    margin-bottom:6px; cursor:pointer; background:#fff; transition: border-color 0.15s ease;
+  }
+  .pipeline-job-item:hover{ border-color:var(--teal); }
+  .pipeline-job-item.active{ background:var(--text); border-color:var(--text); }
+  .pipeline-job-item.active .pipeline-job-name,
+  .pipeline-job-item.active .pipeline-job-loc{ color:var(--panel); }
+  .pipeline-job-name{ font-size:12.5px; font-weight:500; color:var(--text); }
+  .pipeline-job-loc{ font-size:10.5px; color:var(--text-dim); margin-top:2px; }
+  .pipeline-job-header{ font-size:13px; color:var(--text-dim); margin-bottom:10px; min-height:1.2em; }
+  .refresh-btn{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.04em;
+    padding:6px 12px; border:1px solid var(--border); border-radius:var(--radius);
+    background:#fff; color:var(--text-dim); cursor:pointer; white-space:nowrap;
+  }
+  .refresh-btn:hover{ color:var(--text); border-color:var(--teal); }
+  input#pipelineFilter{
+    background:#fff; border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace;
+    font-size:12px; padding:7px 10px; border-radius:var(--radius); min-width:210px; outline:none;
+  }
+  .td-sub{ font-size:10.5px; color:var(--text-faint); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px; }
+  td.candidate-cell{ max-width:200px; }
+  td.links a{ color:var(--teal); font-size:11px; margin-right:10px; text-decoration:none; }
+  td.links a:hover{ text-decoration:underline; }
+  @media (max-width:900px){
+    .pipeline-grid{ grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="toast-container" id="toastContainer"></div>
+<div class="wrap">
+
+  <nav class="suite-nav">
+    <a class="suite-tab" href="/overview.html">Overview</a>
+    <a class="suite-tab" href="/">Sourcing Desk</a>
+    <a class="suite-tab" href="/outreach.html">Outreach Control</a>
+    <a class="suite-tab" href="/leads.html">Leads Dashboard</a>
+    <a class="suite-tab active" href="/jobs.html">Job Pipeline</a>
+    <button type="button" class="suite-tab signout" id="signOutBtn">Sign out</button>
+  </nav>
+
+  <div class="header">
+    <div>
+      <div class="eyebrow">Live Hiring Pipeline / Recruiter View</div>
+      <h1>Chiparama Job Pipeline</h1>
+    </div>
+    <div class="header-meta">
+      <div class="runs">Runs via <b>n8n</b> · <b>RecruitCRM</b></div>
+      <div class="live-pill"><span class="dot"></span>LIVE</div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="table-head">
+      <div>
+        <h2 style="margin-bottom:2px;">Open Jobs</h2>
+        <div class="panel-sub" style="margin-bottom:0;">Pulled live from RecruitCRM — select a job to see who's assigned and at what stage</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="pipelineFilter" type="text" placeholder="Filter jobs by name or location…">
+        <button type="button" class="refresh-btn" id="refreshJobsBtn">Refresh Jobs</button>
+      </div>
+    </div>
+    <div class="pipeline-grid">
+      <div class="pipeline-jobs" id="pipelineJobsList"><div class="empty-note">Loading open jobs…</div></div>
+      <div class="pipeline-candidates">
+        <div class="pipeline-job-header" id="pipelineJobHeader"></div>
+        <table id="pipelineCandidatesTable" style="display:none;">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Stage</th>
+              <th>Experience</th>
+              <th>Location</th>
+              <th>Source</th>
+              <th>Links</th>
+            </tr>
+          </thead>
+          <tbody id="pipelineCandidatesBody"></tbody>
+        </table>
+        <div class="empty-note" id="pipelineCandidatesEmpty">Select a job on the left to see assigned candidates.</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="footer">
+    <span id="healthText">Runs on demand — not part of the 90s outreach refresh.</span>
+  </div>
+
+</div>
+
+<script>
+const JOBS_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-open-jobs";
+const JOB_CANDIDATES_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-job-candidates";
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+let lastLoadFailed = false;
+function showToast(message, type){
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+
+// This page hits RecruitCRM directly and on demand -- the job list loads
+// once on page open and only refreshes on an explicit click; candidates are
+// fetched one job at a time, only when a recruiter actually selects it.
+window.__pipelineJobs = [];
+window.__pipelineSelectedSlug = null;
+
+async function loadOpenJobs(){
+  const list = document.getElementById('pipelineJobsList');
+  list.innerHTML = '<div class="empty-note">Loading open jobs…</div>';
+  try{
+    const res = await fetch(JOBS_API_URL, { cache:'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    window.__pipelineJobs = Array.isArray(data.jobs) ? data.jobs : [];
+    renderPipelineJobs();
+    lastLoadFailed = false;
+    document.getElementById('healthText').textContent = 'Job list loaded · runs on demand, not part of the 90s outreach refresh.';
+  }catch(err){
+    list.innerHTML = '<div class="empty-note">Could not load open jobs (' + escapeHtml(err.message) + ').</div>';
+    document.getElementById('healthText').textContent = 'Job Pipeline API unreachable — try Refresh Jobs.';
+    if(!lastLoadFailed) showToast('Could not load open jobs: ' + err.message, 'err');
+    lastLoadFailed = true;
+  }
+}
+
+function renderPipelineJobs(){
+  const q = (document.getElementById('pipelineFilter').value || '').toLowerCase().trim();
+  const jobs = window.__pipelineJobs || [];
+  const filtered = q ? jobs.filter(j =>
+    (j.name||'').toLowerCase().includes(q) || [j.city, j.state, j.country].filter(Boolean).join(' ').toLowerCase().includes(q)
+  ) : jobs;
+  const list = document.getElementById('pipelineJobsList');
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-note">${jobs.length ? 'No open jobs match that filter.' : 'No open jobs right now.'}</div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(j => {
+    const loc = [j.city, j.state, j.country].filter(Boolean).join(', ') || 'Location unspecified';
+    const activeCls = j.slug === window.__pipelineSelectedSlug ? ' active' : '';
+    return `<div class="pipeline-job-item${activeCls}" data-slug="${escapeHtml(j.slug)}">
+      <div class="pipeline-job-name">${escapeHtml(j.name)}</div>
+      <div class="pipeline-job-loc">${escapeHtml(loc)}</div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.pipeline-job-item').forEach(el => {
+    el.addEventListener('click', () => selectPipelineJob(el.getAttribute('data-slug')));
+  });
+}
+
+async function selectPipelineJob(slug){
+  window.__pipelineSelectedSlug = slug;
+  renderPipelineJobs();
+
+  const job = (window.__pipelineJobs || []).find(j => j.slug === slug);
+  const header = document.getElementById('pipelineJobHeader');
+  const table = document.getElementById('pipelineCandidatesTable');
+  const body = document.getElementById('pipelineCandidatesBody');
+  const emptyMsg = document.getElementById('pipelineCandidatesEmpty');
+
+  header.textContent = job ? job.name + (job.numberOfOpenings ? ' · ' + job.numberOfOpenings + ' opening' + (job.numberOfOpenings === 1 ? '' : 's') : '') : '';
+  table.style.display = 'none';
+  emptyMsg.style.display = 'block';
+  emptyMsg.textContent = 'Loading candidates…';
+
+  try{
+    const res = await fetch(JOB_CANDIDATES_API_URL + '?jobSlug=' + encodeURIComponent(slug), { cache:'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+
+    if(candidates.length === 0){
+      table.style.display = 'none';
+      emptyMsg.style.display = 'block';
+      emptyMsg.textContent = 'No candidates assigned to this job yet.';
+      return;
+    }
+
+    emptyMsg.style.display = 'none';
+    table.style.display = '';
+    body.innerHTML = candidates.map(c => `
+      <tr>
+        <td class="candidate-cell">${escapeHtml(c.name)}${c.email ? `<div class="td-sub">${escapeHtml(c.email)}</div>` : ''}</td>
+        <td><span class="pill sends">${escapeHtml(c.stage || 'Unknown')}</span></td>
+        <td>${c.experienceYears != null && c.experienceYears !== 0 ? c.experienceYears + ' yr' : '—'}</td>
+        <td class="role" title="${escapeHtml(c.location||'')}">${escapeHtml(c.location || '—')}</td>
+        <td class="role">${escapeHtml(c.source || '—')}</td>
+        <td class="links">${[
+          c.resumeUrl ? `<a href="${escapeHtml(c.resumeUrl)}" target="_blank" rel="noopener">Resume</a>` : '',
+          c.linkedinUrl ? `<a href="${escapeHtml(c.linkedinUrl)}" target="_blank" rel="noopener">LinkedIn</a>` : ''
+        ].filter(Boolean).join('') || '—'}</td>
+      </tr>`).join('');
+  }catch(err){
+    table.style.display = 'none';
+    emptyMsg.style.display = 'block';
+    emptyMsg.textContent = 'Could not load candidates (' + err.message + ').';
+    showToast('Could not load candidates: ' + err.message, 'err');
+  }
+}
+
+document.getElementById('pipelineFilter').addEventListener('input', renderPipelineJobs);
+document.getElementById('refreshJobsBtn').addEventListener('click', loadOpenJobs);
+loadOpenJobs();
+
+document.getElementById('signOutBtn').addEventListener('click', async () => {
+  try{ await fetch('/api/auth/logout', { method: 'POST' }); } catch(err){ /* ignore, redirect anyway */ }
+  window.location.href = '/login.html';
+});
+</script>
+</body>
+</html>
