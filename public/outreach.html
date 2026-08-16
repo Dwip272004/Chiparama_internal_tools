@@ -197,6 +197,33 @@
   .seq-arrow{ color: var(--text-faint); font-size: 14px; flex: none; }
   .seq-link.stage{ background: #fff; border-color: var(--text-dim); border-style: dashed; }
   .seq-stage{ font-family:'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 600; color: var(--text-dim); }
+
+  /* ---------- Job Pipeline (live RecruitCRM browser) ---------- */
+  .pipeline-grid{ display:grid; grid-template-columns: 280px 1fr; gap:14px; align-items:start; }
+  .pipeline-jobs{ max-height:520px; overflow-y:auto; }
+  .pipeline-job-item{
+    padding:8px 10px; border:1px solid var(--border); border-radius:var(--radius);
+    margin-bottom:6px; cursor:pointer; background:#fff; transition: border-color 0.15s ease;
+  }
+  .pipeline-job-item:hover{ border-color:var(--teal); }
+  .pipeline-job-item.active{ background:var(--text); border-color:var(--text); }
+  .pipeline-job-item.active .pipeline-job-name,
+  .pipeline-job-item.active .pipeline-job-loc{ color:var(--panel); }
+  .pipeline-job-name{ font-size:12.5px; font-weight:500; color:var(--text); }
+  .pipeline-job-loc{ font-size:10.5px; color:var(--text-dim); margin-top:2px; }
+  .pipeline-job-header{ font-size:13px; color:var(--text-dim); margin-bottom:10px; min-height:1.2em; }
+  .refresh-btn{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.04em;
+    padding:6px 12px; border:1px solid var(--border); border-radius:var(--radius);
+    background:#fff; color:var(--text-dim); cursor:pointer; white-space:nowrap;
+  }
+  .refresh-btn:hover{ color:var(--text); border-color:var(--teal); }
+  .td-sub{ font-size:10.5px; color:var(--text-faint); margin-top:2px; }
+  td.links a{ color:var(--teal); font-size:11px; margin-right:10px; text-decoration:none; }
+  td.links a:hover{ text-decoration:underline; }
+  @media (max-width:900px){
+    .pipeline-grid{ grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -275,6 +302,39 @@
     </section>
   </div>
 
+  <section class="panel">
+    <div class="table-head">
+      <div>
+        <h2 style="margin-bottom:2px;">Job Pipeline</h2>
+        <div class="panel-sub" style="margin-bottom:0;">Open jobs pulled live from RecruitCRM — select one to see who's assigned and at what stage</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input id="pipelineFilter" type="text" placeholder="Filter jobs by name or location…">
+        <button type="button" class="refresh-btn" id="refreshJobsBtn">Refresh Jobs</button>
+      </div>
+    </div>
+    <div class="pipeline-grid">
+      <div class="pipeline-jobs" id="pipelineJobsList"><div class="empty-note">Loading open jobs…</div></div>
+      <div class="pipeline-candidates">
+        <div class="pipeline-job-header" id="pipelineJobHeader"></div>
+        <table id="pipelineCandidatesTable" style="display:none;">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Stage</th>
+              <th>Experience</th>
+              <th>Location</th>
+              <th>Source</th>
+              <th>Links</th>
+            </tr>
+          </thead>
+          <tbody id="pipelineCandidatesBody"></tbody>
+        </table>
+        <div class="empty-note" id="pipelineCandidatesEmpty">Select a job on the left to see assigned candidates.</div>
+      </div>
+    </div>
+  </section>
+
   <div class="footer">
     <span id="healthText">Checking system status…</span>
     <span>Refresh interval: 90s</span>
@@ -284,6 +344,8 @@
 
 <script>
 const API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-dashboard-metrics";
+const JOBS_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-open-jobs";
+const JOB_CANDIDATES_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-job-candidates";
 const REFRESH_MS = 90000;
 
 function fmtNum(n){ return (n ?? 0).toLocaleString(); }
@@ -503,6 +565,108 @@ document.getElementById('activityFilter').addEventListener('input', () => {
 });
 loadDashboard();
 setInterval(loadDashboard, REFRESH_MS);
+
+// ---------- Job Pipeline (live RecruitCRM browser) ----------
+// Deliberately NOT tied to the 90s auto-refresh above -- this hits RecruitCRM
+// directly, so the job list loads once on page open and only refreshes on an
+// explicit click; candidates are fetched on demand, one job at a time, only
+// when a recruiter actually selects it.
+window.__pipelineJobs = [];
+window.__pipelineSelectedSlug = null;
+
+async function loadOpenJobs(){
+  const list = document.getElementById('pipelineJobsList');
+  list.innerHTML = '<div class="empty-note">Loading open jobs…</div>';
+  try{
+    const res = await fetch(JOBS_API_URL, { cache:'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    window.__pipelineJobs = Array.isArray(data.jobs) ? data.jobs : [];
+    renderPipelineJobs();
+  }catch(err){
+    list.innerHTML = '<div class="empty-note">Could not load open jobs (' + escapeHtml(err.message) + ').</div>';
+    showToast('Could not load open jobs: ' + err.message, 'err');
+  }
+}
+
+function renderPipelineJobs(){
+  const q = (document.getElementById('pipelineFilter').value || '').toLowerCase().trim();
+  const jobs = window.__pipelineJobs || [];
+  const filtered = q ? jobs.filter(j =>
+    (j.name||'').toLowerCase().includes(q) || [j.city, j.state, j.country].filter(Boolean).join(' ').toLowerCase().includes(q)
+  ) : jobs;
+  const list = document.getElementById('pipelineJobsList');
+
+  if(filtered.length === 0){
+    list.innerHTML = `<div class="empty-note">${jobs.length ? 'No open jobs match that filter.' : 'No open jobs right now.'}</div>`;
+    return;
+  }
+  list.innerHTML = filtered.map(j => {
+    const loc = [j.city, j.state, j.country].filter(Boolean).join(', ') || 'Location unspecified';
+    const activeCls = j.slug === window.__pipelineSelectedSlug ? ' active' : '';
+    return `<div class="pipeline-job-item${activeCls}" data-slug="${escapeHtml(j.slug)}">
+      <div class="pipeline-job-name">${escapeHtml(j.name)}</div>
+      <div class="pipeline-job-loc">${escapeHtml(loc)}</div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.pipeline-job-item').forEach(el => {
+    el.addEventListener('click', () => selectPipelineJob(el.getAttribute('data-slug')));
+  });
+}
+
+async function selectPipelineJob(slug){
+  window.__pipelineSelectedSlug = slug;
+  renderPipelineJobs();
+
+  const job = (window.__pipelineJobs || []).find(j => j.slug === slug);
+  const header = document.getElementById('pipelineJobHeader');
+  const table = document.getElementById('pipelineCandidatesTable');
+  const body = document.getElementById('pipelineCandidatesBody');
+  const emptyMsg = document.getElementById('pipelineCandidatesEmpty');
+
+  header.textContent = job ? job.name + (job.numberOfOpenings ? ' · ' + job.numberOfOpenings + ' opening' + (job.numberOfOpenings === 1 ? '' : 's') : '') : '';
+  table.style.display = 'none';
+  emptyMsg.style.display = 'block';
+  emptyMsg.textContent = 'Loading candidates…';
+
+  try{
+    const res = await fetch(JOB_CANDIDATES_API_URL + '?jobSlug=' + encodeURIComponent(slug), { cache:'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+
+    if(candidates.length === 0){
+      table.style.display = 'none';
+      emptyMsg.style.display = 'block';
+      emptyMsg.textContent = 'No candidates assigned to this job yet.';
+      return;
+    }
+
+    emptyMsg.style.display = 'none';
+    table.style.display = '';
+    body.innerHTML = candidates.map(c => `
+      <tr>
+        <td>${escapeHtml(c.name)}${c.email ? `<div class="td-sub">${escapeHtml(c.email)}</div>` : ''}</td>
+        <td><span class="pill sends">${escapeHtml(c.stage || 'Unknown')}</span></td>
+        <td>${c.experienceYears != null && c.experienceYears !== 0 ? c.experienceYears + ' yr' : '—'}</td>
+        <td class="role" title="${escapeHtml(c.location||'')}">${escapeHtml(c.location || '—')}</td>
+        <td class="role">${escapeHtml(c.source || '—')}</td>
+        <td class="links">${[
+          c.resumeUrl ? `<a href="${escapeHtml(c.resumeUrl)}" target="_blank" rel="noopener">Resume</a>` : '',
+          c.linkedinUrl ? `<a href="${escapeHtml(c.linkedinUrl)}" target="_blank" rel="noopener">LinkedIn</a>` : ''
+        ].filter(Boolean).join('') || '—'}</td>
+      </tr>`).join('');
+  }catch(err){
+    table.style.display = 'none';
+    emptyMsg.style.display = 'block';
+    emptyMsg.textContent = 'Could not load candidates (' + err.message + ').';
+    showToast('Could not load candidates: ' + err.message, 'err');
+  }
+}
+
+document.getElementById('pipelineFilter').addEventListener('input', renderPipelineJobs);
+document.getElementById('refreshJobsBtn').addEventListener('click', loadOpenJobs);
+loadOpenJobs();
 
 document.getElementById('signOutBtn').addEventListener('click', async () => {
   try{ await fetch('/api/auth/logout', { method: 'POST' }); } catch(err){ /* ignore, redirect anyway */ }
