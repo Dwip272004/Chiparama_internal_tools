@@ -162,8 +162,31 @@
   }
   .td-sub{ font-size:10.5px; color:var(--text-faint); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px; }
   td.candidate-cell{ max-width:200px; }
-  td.links a{ color:var(--teal); font-size:11px; margin-right:10px; text-decoration:none; }
-  td.links a:hover{ text-decoration:underline; }
+  td.links a, td.links button.link-btn{ color:var(--teal); font-size:11px; margin-right:10px; text-decoration:none; background:none; border:none; cursor:pointer; padding:0; font-family:'IBM Plex Sans', sans-serif; }
+  td.links a:hover, td.links button.link-btn:hover{ text-decoration:underline; }
+  select#pipelineStatusFilter{
+    background:#fff; border:1px solid var(--border); color:var(--text); font-family:'IBM Plex Mono',monospace;
+    font-size:12px; padding:7px 10px; border-radius:var(--radius); outline:none;
+  }
+  .stage-group-row td{
+    background:var(--teal-bg); color:var(--teal); font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em;
+    padding:6px 10px; border-bottom:1px solid var(--border);
+  }
+  .history-row td{ background:#fff; padding:10px; }
+  .history-empty{ font-size:11px; color:var(--text-faint); }
+  .hist-chain{ display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+  .hist-pill{
+    font-family:'IBM Plex Mono', monospace; font-size:10px; padding:4px 8px;
+    border:1px dashed var(--text-dim); border-radius:var(--radius); background:#fff; color:var(--text-dim);
+  }
+  .hist-arrow{ color:var(--text-faint); font-size:12px; flex:none; }
+  .pipeline-job-detail{
+    margin-bottom:14px; padding:12px 14px; background:#fff; border:1px solid var(--border); border-radius:var(--radius);
+  }
+  .pipeline-job-detail .jd-title{ font-family:'Roboto Slab', Georgia, serif; font-weight:700; font-size:15px; color:var(--text); margin-bottom:6px; }
+  .pipeline-job-detail .jd-meta{ display:flex; flex-wrap:wrap; gap:12px; margin-bottom:8px; font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-dim); }
+  .pipeline-job-detail .jd-desc{ font-size:11.5px; line-height:1.55; color:var(--text-dim); max-height:110px; overflow-y:auto; }
   @media (max-width:900px){
     .pipeline-grid{ grid-template-columns: 1fr; }
   }
@@ -200,6 +223,7 @@
         <div class="panel-sub" style="margin-bottom:0;">Pulled live from RecruitCRM — select a job to see who's assigned and at what stage</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
+        <select id="pipelineStatusFilter"></select>
         <input id="pipelineFilter" type="text" placeholder="Filter jobs by name or location…">
         <button type="button" class="refresh-btn" id="refreshJobsBtn">Refresh Jobs</button>
       </div>
@@ -208,6 +232,7 @@
       <div class="pipeline-jobs" id="pipelineJobsList"><div class="empty-note">Loading open jobs…</div></div>
       <div class="pipeline-candidates">
         <div class="pipeline-job-header" id="pipelineJobHeader"></div>
+        <div class="pipeline-job-detail" id="pipelineJobDetail" style="display:none;"></div>
         <table id="pipelineCandidatesTable" style="display:none;">
           <thead>
             <tr>
@@ -235,9 +260,25 @@
 <script>
 const JOBS_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-open-jobs";
 const JOB_CANDIDATES_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-job-candidates";
+const CANDIDATE_HISTORY_API_URL = "https://diwp645.app.n8n.cloud/webhook/chiparama-candidate-history";
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtDate(v){
+  if(!v) return '—';
+  const dt = new Date(v);
+  if(isNaN(dt)) return String(v);
+  return dt.toLocaleDateString([], {month:'short', day:'numeric', year:'numeric'});
+}
+function fmtSalary(job){
+  if(job.minSalary == null && job.maxSalary == null) return '';
+  const fmt = n => '$' + Number(n).toLocaleString();
+  if(job.minSalary != null && job.maxSalary != null && job.minSalary !== job.maxSalary){
+    return fmt(job.minSalary) + ' – ' + fmt(job.maxSalary) + (job.salaryType ? ' / ' + job.salaryType : '');
+  }
+  const single = job.minSalary ?? job.maxSalary;
+  return fmt(single) + (job.salaryType ? ' / ' + job.salaryType : '');
 }
 
 let lastLoadFailed = false;
@@ -264,6 +305,7 @@ async function loadOpenJobs(){
     if(!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     window.__pipelineJobs = Array.isArray(data.jobs) ? data.jobs : [];
+    populateStatusFilter();
     renderPipelineJobs();
     lastLoadFailed = false;
     document.getElementById('healthText').textContent = 'Job list loaded · runs on demand, not part of the 90s outreach refresh.';
@@ -275,16 +317,32 @@ async function loadOpenJobs(){
   }
 }
 
+// Built once per load from whatever statuses RecruitCRM actually returns --
+// not hardcoded, since the org's status labels could change. Defaults to
+// "Open" (the common recruiter view) when that status exists.
+function populateStatusFilter(){
+  const jobs = window.__pipelineJobs || [];
+  const statuses = Array.from(new Set(jobs.map(j => j.status || 'Unknown'))).sort();
+  const select = document.getElementById('pipelineStatusFilter');
+  const prevValue = select.value;
+  const hasOpen = statuses.includes('Open');
+  select.innerHTML = '<option value="">All statuses</option>' +
+    statuses.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+  select.value = statuses.includes(prevValue) ? prevValue : (hasOpen ? 'Open' : '');
+}
+
 function renderPipelineJobs(){
   const q = (document.getElementById('pipelineFilter').value || '').toLowerCase().trim();
+  const statusFilter = document.getElementById('pipelineStatusFilter').value;
   const jobs = window.__pipelineJobs || [];
-  const filtered = q ? jobs.filter(j =>
+  let filtered = statusFilter ? jobs.filter(j => (j.status || 'Unknown') === statusFilter) : jobs;
+  filtered = q ? filtered.filter(j =>
     (j.name||'').toLowerCase().includes(q) || [j.city, j.state, j.country].filter(Boolean).join(' ').toLowerCase().includes(q)
-  ) : jobs;
+  ) : filtered;
   const list = document.getElementById('pipelineJobsList');
 
   if(filtered.length === 0){
-    list.innerHTML = `<div class="empty-note">${jobs.length ? 'No open jobs match that filter.' : 'No open jobs right now.'}</div>`;
+    list.innerHTML = `<div class="empty-note">${jobs.length ? 'No jobs match that filter.' : 'No jobs right now.'}</div>`;
     return;
   }
   list.innerHTML = filtered.map(j => {
@@ -300,6 +358,64 @@ function renderPipelineJobs(){
   });
 }
 
+function renderJobDetail(job){
+  const detail = document.getElementById('pipelineJobDetail');
+  if(!job){ detail.style.display = 'none'; return; }
+  const salary = fmtSalary(job);
+  const meta = [
+    job.status ? job.status : '',
+    job.jobType || '',
+    salary,
+    job.numberOfOpenings != null ? job.numberOfOpenings + ' opening' + (job.numberOfOpenings === 1 ? '' : 's') : '',
+    job.createdOn ? 'Posted ' + fmtDate(job.createdOn) : ''
+  ].filter(Boolean);
+  detail.innerHTML = `
+    <div class="jd-title">${escapeHtml(job.name)}</div>
+    <div class="jd-meta">${meta.map(m => `<span>${escapeHtml(m)}</span>`).join('')}</div>
+    ${job.description ? `<div class="jd-desc">${escapeHtml(job.description)}</div>` : ''}
+  `;
+  detail.style.display = '';
+}
+
+// candidateId -> fetched history array, cached so re-expanding doesn't refetch.
+window.__historyCache = {};
+
+async function toggleCandidateHistory(candidateId, rowEl){
+  const existing = rowEl.nextElementSibling;
+  if(existing && existing.classList.contains('history-row')){
+    existing.remove();
+    return;
+  }
+  const histRow = document.createElement('tr');
+  histRow.className = 'history-row';
+  const colCount = rowEl.children.length;
+  histRow.innerHTML = `<td colspan="${colCount}">Loading history…</td>`;
+  rowEl.after(histRow);
+
+  try{
+    let history = window.__historyCache[candidateId];
+    if(!history){
+      const res = await fetch(CANDIDATE_HISTORY_API_URL + '?candidateId=' + encodeURIComponent(candidateId), { cache:'no-store' });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      history = Array.isArray(data.history) ? data.history : [];
+      window.__historyCache[candidateId] = history;
+    }
+    if(history.length === 0){
+      histRow.innerHTML = `<td colspan="${colCount}"><span class="history-empty">No stage history recorded yet for this candidate.</span></td>`;
+      return;
+    }
+    const chain = history.map((h, i) => {
+      const arrow = i > 0 ? '<span class="hist-arrow">→</span>' : '';
+      const label = h.fromStage ? `${h.fromStage} → ${h.toStage}` : `${h.toStage}`;
+      return `${arrow}<span class="hist-pill">${escapeHtml(label)} <span style="color:var(--text-faint);">· ${fmtDate(h.changedAt)}</span></span>`;
+    }).join('');
+    histRow.innerHTML = `<td colspan="${colCount}"><div class="hist-chain">${chain}</div></td>`;
+  }catch(err){
+    histRow.innerHTML = `<td colspan="${colCount}"><span class="history-empty">Could not load history (${escapeHtml(err.message)}).</span></td>`;
+  }
+}
+
 async function selectPipelineJob(slug){
   window.__pipelineSelectedSlug = slug;
   renderPipelineJobs();
@@ -310,7 +426,8 @@ async function selectPipelineJob(slug){
   const body = document.getElementById('pipelineCandidatesBody');
   const emptyMsg = document.getElementById('pipelineCandidatesEmpty');
 
-  header.textContent = job ? job.name + (job.numberOfOpenings ? ' · ' + job.numberOfOpenings + ' opening' + (job.numberOfOpenings === 1 ? '' : 's') : '') : '';
+  header.textContent = '';
+  renderJobDetail(job);
   table.style.display = 'none';
   emptyMsg.style.display = 'block';
   emptyMsg.textContent = 'Loading candidates…';
@@ -330,18 +447,39 @@ async function selectPipelineJob(slug){
 
     emptyMsg.style.display = 'none';
     table.style.display = '';
-    body.innerHTML = candidates.map(c => `
-      <tr>
-        <td class="candidate-cell">${escapeHtml(c.name)}${c.email ? `<div class="td-sub">${escapeHtml(c.email)}</div>` : ''}</td>
-        <td><span class="pill sends">${escapeHtml(c.stage || 'Unknown')}</span></td>
-        <td>${c.experienceYears != null && c.experienceYears !== 0 ? c.experienceYears + ' yr' : '—'}</td>
-        <td class="role" title="${escapeHtml(c.location||'')}">${escapeHtml(c.location || '—')}</td>
-        <td class="role">${escapeHtml(c.source || '—')}</td>
-        <td class="links">${[
-          c.resumeUrl ? `<a href="${escapeHtml(c.resumeUrl)}" target="_blank" rel="noopener">Resume</a>` : '',
-          c.linkedinUrl ? `<a href="${escapeHtml(c.linkedinUrl)}" target="_blank" rel="noopener">LinkedIn</a>` : ''
-        ].filter(Boolean).join('') || '—'}</td>
-      </tr>`).join('');
+
+    // Group by stage, preserving each stage's first-appearance order in the
+    // (already recency-sorted) list so the busiest/most-recent stages surface first.
+    const groups = [];
+    const groupIndex = {};
+    candidates.forEach(c => {
+      const stage = c.stage || 'Unknown';
+      if(!(stage in groupIndex)){ groupIndex[stage] = groups.length; groups.push({ stage: stage, rows: [] }); }
+      groups[groupIndex[stage]].rows.push(c);
+    });
+
+    body.innerHTML = groups.map(g => {
+      const headerRow = `<tr class="stage-group-row"><td colspan="6">${escapeHtml(g.stage)} (${g.rows.length})</td></tr>`;
+      const rows = g.rows.map(c => `
+        <tr>
+          <td class="candidate-cell">${escapeHtml(c.name)}${c.email ? `<div class="td-sub">${escapeHtml(c.email)}</div>` : ''}</td>
+          <td><span class="pill sends">${escapeHtml(c.stage || 'Unknown')}</span></td>
+          <td>${c.experienceYears != null && c.experienceYears !== 0 ? c.experienceYears + ' yr' : '—'}</td>
+          <td class="role" title="${escapeHtml(c.location||'')}">${escapeHtml(c.location || '—')}</td>
+          <td class="role">${escapeHtml(c.source || '—')}</td>
+          <td class="links">${[
+            c.candidateId ? `<button type="button" class="link-btn" data-history-id="${escapeHtml(c.candidateId)}">History</button>` : '',
+            c.email ? `<a href="/outreach.html?candidate=${encodeURIComponent(c.email)}" target="_blank" rel="noopener">Outreach</a>` : '',
+            c.resumeUrl ? `<a href="${escapeHtml(c.resumeUrl)}" target="_blank" rel="noopener">Resume</a>` : '',
+            c.linkedinUrl ? `<a href="${escapeHtml(c.linkedinUrl)}" target="_blank" rel="noopener">LinkedIn</a>` : ''
+          ].filter(Boolean).join('') || '—'}</td>
+        </tr>`).join('');
+      return headerRow + rows;
+    }).join('');
+
+    body.querySelectorAll('[data-history-id]').forEach(btn => {
+      btn.addEventListener('click', () => toggleCandidateHistory(btn.getAttribute('data-history-id'), btn.closest('tr')));
+    });
   }catch(err){
     table.style.display = 'none';
     emptyMsg.style.display = 'block';
@@ -351,6 +489,7 @@ async function selectPipelineJob(slug){
 }
 
 document.getElementById('pipelineFilter').addEventListener('input', renderPipelineJobs);
+document.getElementById('pipelineStatusFilter').addEventListener('change', renderPipelineJobs);
 document.getElementById('refreshJobsBtn').addEventListener('click', loadOpenJobs);
 loadOpenJobs();
 

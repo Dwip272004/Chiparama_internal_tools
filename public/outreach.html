@@ -507,6 +507,16 @@ document.getElementById('activityFilter').addEventListener('input', () => {
   renderSendsTable();
   renderSequences();
 });
+
+// Deep link from the Job Pipeline's "Outreach" button (?candidate=email) --
+// pre-fill the filter and jump straight to Sequences so the specific
+// candidate's history is what the recruiter lands on, not the full log.
+const deepLinkCandidate = new URLSearchParams(window.location.search).get('candidate');
+if(deepLinkCandidate){
+  document.getElementById('activityFilter').value = deepLinkCandidate;
+  setActiveTab('sequences');
+}
+
 loadDashboard();
 setInterval(loadDashboard, REFRESH_MS);
 
