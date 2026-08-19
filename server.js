@@ -7,7 +7,11 @@ import { createClient } from "@supabase/supabase-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json());
+// Default 100kb is too small for candidate payloads -- they carry the full
+// raw LinkedIn + Apollo JSON blobs (linkedin_raw/apollo_raw) by design, so
+// no enrichment data gets discarded. A real production candidate already
+// exceeded 100kb and got rejected with "Payload Too Large" before this fix.
+app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
 const {
