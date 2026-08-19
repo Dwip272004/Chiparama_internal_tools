@@ -276,12 +276,27 @@ app.post("/api/internal/candidates", requireInternalKey, async (req, res) => {
 app.get("/api/internal/candidates", requireInternalKey, async (req, res) => {
   try {
     const searchRequestId = req.query.search_request_id;
-    if (!searchRequestId) return res.status(400).json({ error: "search_request_id is required." });
+    if (!searchRequestId) {
+      // No search_request_id -- full-list mode, for reporting workflows
+      // (e.g. the Daily Digest) that need to look across all candidates,
+      // not just one run's.
+      const candidates = await fetchAllRows(supabase, "candidates");
+      return res.json({ candidates });
+    }
     const { data, error } = await supabase.rpc("get_candidates_for_search", {
       p_search_request_id: searchRequestId
     });
     if (error) return res.status(500).json({ error: error.message });
     res.json({ candidates: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/internal/search-requests", requireInternalKey, async (req, res) => {
+  try {
+    const requests = await fetchAllRows(supabase, "search_requests");
+    res.json({ requests });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
