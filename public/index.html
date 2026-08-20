@@ -1195,8 +1195,15 @@
     }
   }
 
+  // Recruiters only need to hand-review a manageable slice per run -- the
+  // rest are still pulled into the pool and pushed to RecruitCRM by the
+  // workflow itself, they just aren't rendered as pick-able cards here.
+  const DASHBOARD_DISPLAY_LIMIT = 50;
+
   function renderResults(candidates, summary, totalFoundOnLinkedIn){
     lastRenderedCandidates = candidates || [];
+    const displayCandidates = (candidates || []).slice(0, DASHBOARD_DISPLAY_LIMIT);
+    const hiddenCount = (candidates || []).length - displayCandidates.length;
     const wrap = document.createElement("div");
 
     if(totalFoundOnLinkedIn){
@@ -1219,13 +1226,23 @@
       wrap.appendChild(s);
     }
 
+    if(hiddenCount > 0){
+      const h = document.createElement("div");
+      h.className = "summary";
+      h.innerHTML = `
+        <span class="count">${displayCandidates.length}</span>
+        <span class="label">shown below for review — the remaining ${hiddenCount} were already added to RecruitCRM as unassigned candidates and don't need a manual pick</span>
+      `;
+      wrap.appendChild(h);
+    }
+
     assignSelection = new Map();
     const assignBar = buildAssignToolbar(wrap, $("recruitCrmJob") ? $("recruitCrmJob").value.trim() : "");
 
     const cardsWrap = document.createElement("div");
     cardsWrap.className = "cards";
-    buildCandidateCards(cardsWrap, candidates, assignBar);
-    checkAssignAvailability(cardsWrap, assignBar, candidates);
+    buildCandidateCards(cardsWrap, displayCandidates, assignBar);
+    checkAssignAvailability(cardsWrap, assignBar, displayCandidates);
     wrap.appendChild(cardsWrap);
     board.appendChild(wrap);
   }
@@ -1234,6 +1251,8 @@
   // sheet-overview payload — no workflow run, just browsing history.
   function renderHistoryCandidates(item){
     lastRenderedCandidates = item.candidates || [];
+    const displayCandidates = (item.candidates || []).slice(0, DASHBOARD_DISPLAY_LIMIT);
+    const hiddenCount = (item.candidates || []).length - displayCandidates.length;
     board.innerHTML = "";
     const wrap = document.createElement("div");
 
@@ -1248,13 +1267,23 @@
     `;
     wrap.appendChild(s);
 
+    if(hiddenCount > 0){
+      const h = document.createElement("div");
+      h.className = "summary";
+      h.innerHTML = `
+        <span class="count">${displayCandidates.length}</span>
+        <span class="label">shown below for review — the remaining ${hiddenCount} were already added to RecruitCRM as unassigned candidates and don't need a manual pick</span>
+      `;
+      wrap.appendChild(h);
+    }
+
     assignSelection = new Map();
     const assignBar = buildAssignToolbar(wrap, "");
 
     const cardsWrap = document.createElement("div");
     cardsWrap.className = "cards";
-    buildCandidateCards(cardsWrap, item.candidates || [], assignBar);
-    checkAssignAvailability(cardsWrap, assignBar, item.candidates || []);
+    buildCandidateCards(cardsWrap, displayCandidates, assignBar);
+    checkAssignAvailability(cardsWrap, assignBar, displayCandidates);
     wrap.appendChild(cardsWrap);
     board.appendChild(wrap);
   }
