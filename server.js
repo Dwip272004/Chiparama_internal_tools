@@ -468,6 +468,30 @@ app.get("/api/internal/stage-history", requireInternalKey, async (req, res) => {
   }
 });
 
+// Admin-only: resets a user's credit balance to whatever values are given.
+// Looks the user up by email via a SECURITY DEFINER RPC (auth.users is only
+// reachable from inside Postgres, not via the anon-key REST client directly)
+// -- deliberately avoids adding a Supabase service-role key to this server
+// just for this, since the RPC already gets us there with no new secret.
+app.post("/api/internal/reset-credits", requireInternalKey, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.email) return res.status(400).json({ error: "email is required." });
+    if (b.sourcingCredits == null || b.emailCredits == null) {
+      return res.status(400).json({ error: "sourcingCredits and emailCredits are required." });
+    }
+    const { data, error } = await supabase.rpc("admin_reset_credits", {
+      p_email: b.email,
+      p_sourcing_credits: b.sourcingCredits,
+      p_email_credits: b.emailCredits
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ row: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- Credit system helpers ----
 
 // Tracks an email-credit reservation from /api/submit through to the
