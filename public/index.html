@@ -1371,9 +1371,11 @@
     let finalStatus = null;
     let progressLine = null;
     let totalFoundOnLinkedIn = null;
-    const maxAttempts = 90; // ~4.5 min at 3s
+    const maxAttempts = 54; // ~4.5 min at 5s -- server-side caches the heavy
+    // n8n payload for 8s regardless, so polling faster than that just adds
+    // load without adding freshness.
     for(let attempt = 0; attempt < maxAttempts; attempt++){
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 5000));
       try{
         const statusRes = await fetch(`/api/status/${executionId}`);
         const statusJson = await statusRes.json();

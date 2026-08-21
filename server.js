@@ -749,48 +749,76 @@ app.get("/api/find-execution", async (req, res) => {
   }
 });
 
+// executionId -> { at, progress } -- the last includeData:true fetch's
+// derived progress numbers. Polling that payload (2-9+ MB once a run has
+// pulled real candidates, since each one carries a full raw LinkedIn
+// profile blob) on every single 3s poll for a run's whole multi-minute
+// duration is what was driving Render's memory limit -- multiple heavy
+// fetches/parses in flight at once, per concurrent search. Throttling the
+// heavy fetch to once per STATUS_CACHE_TTL_MS keeps the same live progress
+// readout while cutting the actual n8n payload volume by ~70%.
+const statusProgressCache = new Map();
+const STATUS_CACHE_TTL_MS = 8000;
+
 app.get("/api/status/:id", async (req, res) => {
   try {
-    // includeData:true costs a bit more per poll but is the only way to see
-    // how many candidates have been found vs. fully processed so far, which
-    // is what turns the dashboard's ledger from a blind spinner into a real
-    // progress readout.
-    const url = `${N8N_BASE_URL}/api/v1/executions/${req.params.id}?includeData=true`;
-    const r = await fetch(url, { headers: n8nHeaders() });
-    if (!r.ok) return res.status(r.status).json({ error: `Status check failed (${r.status})` });
-    const data = await r.json();
+    const id = req.params.id;
+    const cached = statusProgressCache.get(id);
+    const cacheFresh = cached && (Date.now() - cached.at) < STATUS_CACHE_TTL_MS;
 
-    const runData = (data && data.data && data.data.resultData && data.data.resultData.runData) || {};
+    // Always check status/finished cheaply (no includeData -- tiny payload),
+    // so "did it just finish or crash" is never delayed by the cache.
+    const statusUrl = `${N8N_BASE_URL}/api/v1/executions/${id}`;
+    const statusR = await fetch(statusUrl, { headers: n8nHeaders() });
+    if (!statusR.ok) return res.status(statusR.status).json({ error: `Status check failed (${statusR.status})` });
+    const statusData = await statusR.json();
 
-    function itemCount(nodeName) {
-      const runs = runData[nodeName] || [];
-      let count = 0;
-      for (const run of runs) {
-        const mainOut = (run && run.data && run.data.main && run.data.main[0]) || [];
-        count += mainOut.length;
+    let progress = cached ? cached.progress : null;
+    if (!cacheFresh) {
+      const url = `${N8N_BASE_URL}/api/v1/executions/${id}?includeData=true`;
+      const r = await fetch(url, { headers: n8nHeaders() });
+      if (r.ok) {
+        const data = await r.json();
+        const runData = (data && data.data && data.data.resultData && data.data.resultData.runData) || {};
+
+        function itemCount(nodeName) {
+          const runs = runData[nodeName] || [];
+          let count = 0;
+          for (const run of runs) {
+            const mainOut = (run && run.data && run.data.main && run.data.main[0]) || [];
+            count += mainOut.length;
+          }
+          return count;
+        }
+
+        // "Split Candidates" fires once with the full pooled list — its single
+        // run's item count is the total to work through. "Merge RecruitCRM
+        // Slug" fires once per candidate that's fully scored, enriched, and
+        // filed, so its cumulative run count is progress made so far.
+        const totalCandidates = itemCount("Split Candidates") || null;
+        const processedCandidates = itemCount("Merge RecruitCRM Slug");
+
+        // True total LinkedIn Recruiter reports for this search, which can be
+        // much larger than what got pulled into this batch.
+        const searchRuns = runData["LinkedIn People Search"] || [];
+        const searchOut = (searchRuns[0] && searchRuns[0].data && searchRuns[0].data.main && searchRuns[0].data.main[0] && searchRuns[0].data.main[0][0] && searchRuns[0].data.main[0][0].json) || null;
+        const totalFoundOnLinkedIn = (searchOut && searchOut.paging && searchOut.paging.total_count) || null;
+
+        progress = { totalCandidates, processedCandidates, totalFoundOnLinkedIn };
+        statusProgressCache.set(id, { at: Date.now(), progress });
       }
-      return count;
     }
 
-    // "Split Candidates" fires once with the full pooled list — its single
-    // run's item count is the total to work through. "Merge RecruitCRM
-    // Slug" fires once per candidate that's fully scored, enriched, and
-    // filed, so its cumulative run count is progress made so far.
-    const totalCandidates = itemCount("Split Candidates") || null;
-    const processedCandidates = itemCount("Merge RecruitCRM Slug");
-
-    // True total LinkedIn Recruiter reports for this search, which can be
-    // much larger than what got pulled into this batch.
-    const searchRuns = runData["LinkedIn People Search"] || [];
-    const searchOut = (searchRuns[0] && searchRuns[0].data && searchRuns[0].data.main && searchRuns[0].data.main[0] && searchRuns[0].data.main[0][0] && searchRuns[0].data.main[0][0].json) || null;
-    const totalFoundOnLinkedIn = (searchOut && searchOut.paging && searchOut.paging.total_count) || null;
+    // Finished executions (success/error/crashed) won't be polled again once
+    // the frontend sees them, so there's no reason to keep their cache entry.
+    if (statusData.finished) statusProgressCache.delete(id);
 
     res.json({
-      status: data.status,
-      finished: data.finished,
-      totalCandidates,
-      processedCandidates,
-      totalFoundOnLinkedIn
+      status: statusData.status,
+      finished: statusData.finished,
+      totalCandidates: (progress && progress.totalCandidates) || null,
+      processedCandidates: (progress && progress.processedCandidates) || 0,
+      totalFoundOnLinkedIn: (progress && progress.totalFoundOnLinkedIn) || null
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
