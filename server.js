@@ -957,6 +957,43 @@ app.get("/api/sheet-overview", async (req, res) => {
   }
 });
 
+/**
+ * Fallback used when n8n's own execution record is unusable -- either the
+ * worker crashed mid-run (see /api/status/:id's "crashed" handling, which
+ * leaves n8n's own runData as synthetic recovery placeholders, not real
+ * candidate data) or /api/find-execution never located the execution at
+ * all within its polling window. search_requests/candidates are written to
+ * Supabase early and independently of whether n8n's own execution record
+ * survives, so this looks up the most recent search_requests row for the
+ * signed-in user at/after `since` directly, sidestepping n8n entirely.
+ */
+app.get("/api/results-fallback", async (req, res) => {
+  try {
+    const since = req.query.since;
+    if (!since) return res.status(400).json({ error: "Missing since parameter." });
+    const email = req.user && req.user.email;
+    if (!email) return res.status(401).json({ error: "Not signed in." });
+
+    const requests = await fetchAllRows(supabase, "search_requests");
+    const matches = requests.filter((r) => r.requester_email === email && r.submitted_at >= since);
+    if (!matches.length) return res.json({ found: false });
+    matches.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+    const request = matches[0];
+
+    const { data: candidateRows, error } = await supabase.rpc("get_candidates_for_search", {
+      p_search_request_id: request.id
+    });
+    if (error) return res.status(500).json({ error: error.message });
+
+    const candidates = (candidateRows || []).map(mapCandidateRow);
+    const totalFoundOnLinkedIn = (candidateRows || []).reduce((acc, c) => acc || c.linkedin_total_found || null, null);
+
+    res.json({ found: true, candidates, totalFoundOnLinkedIn, searchRequestId: request.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/results/:id", async (req, res) => {
   try {
     const url = `${N8N_BASE_URL}/api/v1/executions/${req.params.id}?includeData=true`;

@@ -1288,12 +1288,37 @@
     board.appendChild(wrap);
   }
 
+  // Used when n8n's own execution record can't be trusted -- either the
+  // worker crashed mid-run (its runData becomes synthetic recovery
+  // placeholders, not real candidate data) or find-execution never located
+  // the run at all within its polling window. search_requests/candidates
+  // land in Supabase independently of n8n's own execution record surviving,
+  // so this checks there directly before telling the user the run failed.
+  async function tryResultsFallback(since){
+    try{
+      const res = await fetch(`/api/results-fallback?since=${encodeURIComponent(since)}`);
+      const json = await res.json();
+      if(!res.ok || json.error || !json.found) return false;
+      ledgerLine("Found it — your candidates were saved before the interruption.", "ok");
+      ledgerLine("Done", "ok");
+      setStatus("done", "Complete");
+      setProgressDone(false);
+      renderResults(json.candidates, null, json.totalFoundOnLinkedIn);
+      loadHistory();
+      loadCredits();
+      return true;
+    } catch(err){
+      return false;
+    }
+  }
+
   async function runSearch(formData){
     renderLedgerShell();
     ledgerLine("Request received", "ok");
 
     let executionId;
     let requestId;
+    let submittedAt;
     try{
       ledgerLine("Starting workflow…");
       const submitRes = await fetch("/api/submit", {
@@ -1307,6 +1332,7 @@
         throw new Error(submitJson.error || "Submit failed.");
       }
       requestId = submitJson.requestId;
+      submittedAt = submitJson.submittedAt;
 
       // Poll for the execution id ourselves, one short request at a time —
       // deliberately not a single long-blocking call, since a big batch can
@@ -1317,13 +1343,15 @@
       for(let attempt = 0; attempt < findMaxAttempts && !executionId; attempt++){
         await new Promise(r => setTimeout(r, 3000));
         try{
-          const findRes = await fetch(`/api/find-execution?since=${encodeURIComponent(submitJson.submittedAt)}`);
+          const findRes = await fetch(`/api/find-execution?since=${encodeURIComponent(submittedAt)}`);
           const findJson = await findRes.json();
           if(findJson.executionId) executionId = findJson.executionId;
         } catch(err){ /* transient, keep polling */ }
       }
 
       if(!executionId){
+        ledgerLine("n8n hasn't listed the execution yet — checking whether your candidates already saved…");
+        if(await tryResultsFallback(submittedAt)) return;
         ledgerLine("The workflow started fine but is taking a while for n8n to list — check the History panel in a bit, or the Candidates sheet / RecruitCRM directly.", "err");
         setStatus("err", "Unconfirmed");
         setProgressDone(true);
@@ -1365,10 +1393,24 @@
         }
 
         if(statusJson.status === "success" || statusJson.finished === true){ finalStatus = "success"; break; }
-        if(statusJson.status === "error" || statusJson.status === "crashed"){ finalStatus = "error"; break; }
+        if(statusJson.status === "crashed"){ finalStatus = "crashed"; break; }
+        if(statusJson.status === "error"){ finalStatus = "error"; break; }
       } catch(err){ /* transient, keep polling */ }
     }
 
+    if(finalStatus === "crashed"){
+      // n8n's worker died mid-run -- its own execution data is now just a
+      // synthetic recovery placeholder, not real output. That doesn't mean
+      // the run actually failed: writes to Supabase/RecruitCRM happen well
+      // before the workflow's final nodes, so candidates are often already
+      // saved. Check there directly before telling the user it failed.
+      ledgerLine("n8n's connection dropped mid-run — checking whether your candidates already saved…");
+      if(await tryResultsFallback(submittedAt)) return;
+      ledgerLine("Workflow connection was interrupted and no saved candidates were found yet — check RecruitCRM or try again in a minute.", "err");
+      setStatus("err", "Interrupted");
+      setProgressDone(true);
+      return;
+    }
     if(finalStatus === "error"){
       ledgerLine("Workflow reported an error.", "err");
       setStatus("err", "Failed");
