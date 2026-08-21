@@ -218,6 +218,23 @@ app.post("/api/internal/search-requests", requireInternalKey, async (req, res) =
   }
 });
 
+// Called once, by the workflow's own final node, when a run finishes --
+// NOT polled. This is what lets the dashboard stop polling Render/n8n for
+// status entirely: it can just watch this row (and the candidates table)
+// directly in Supabase instead.
+app.post("/api/internal/search-requests/:id/complete", requireInternalKey, async (req, res) => {
+  try {
+    const { data, error } = await supabase.rpc("mark_search_complete", {
+      p_id: req.params.id,
+      p_total_found_on_linkedin: (req.body && req.body.totalFoundOnLinkedIn) || null
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ row: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/api/internal/candidates", requireInternalKey, async (req, res) => {
   try {
     const c = req.body || {};
@@ -1017,6 +1034,48 @@ app.get("/api/results-fallback", async (req, res) => {
     const totalFoundOnLinkedIn = (candidateRows || []).reduce((acc, c) => acc || c.linkedin_total_found || null, null);
 
     res.json({ found: true, candidates, totalFoundOnLinkedIn, searchRequestId: request.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Same credit reconciliation /api/results/:id used to do, but sourced from
+// Supabase directly instead of n8n's execution data -- called exactly once
+// by the dashboard right after it detects (via its own direct Supabase
+// polling) that a search finished, so this never needs n8n/Render polling
+// at all. requestId is server.js's own credit-reservation id from
+// /api/submit; searchRequestId is the Supabase search_requests row id the
+// dashboard found by watching that table directly.
+app.post("/api/reconcile-credits", async (req, res) => {
+  try {
+    const { requestId, searchRequestId } = req.body || {};
+    const reservation = requestId && pendingReservations.get(requestId);
+    if (!reservation || reservation.reconciled) return res.json({ ok: true, reconciled: false });
+
+    const { data: candidateRows, error } = await supabase.rpc("get_candidates_for_search", {
+      p_search_request_id: searchRequestId
+    });
+    if (error) return res.status(500).json({ error: error.message });
+    const candidates = candidateRows || [];
+
+    const actuallyAttempted = candidates.filter((c) => c.email_status !== "skipped_credit_budget").length;
+    const unused = Math.max(0, reservation.emailBudget - actuallyAttempted);
+    const userSupabase = userClient(reservation.token);
+    if (unused > 0) {
+      await Promise.resolve(userSupabase.rpc("refund_email_credits", {
+        amount: unused,
+        p_max: Number(EMAIL_CREDIT_MAX),
+        p_regen_ms: Number(EMAIL_CREDIT_REGEN_MS)
+      })).catch(() => {});
+    }
+    await Promise.resolve(userSupabase.rpc("record_team_candidates", {
+      candidate_count: candidates.length,
+      p_day_ms: Number(TEAM_DAY_MS)
+    })).catch(() => {});
+    reservation.reconciled = true;
+    pendingReservations.delete(requestId);
+
+    res.json({ ok: true, reconciled: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

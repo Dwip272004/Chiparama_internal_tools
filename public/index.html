@@ -601,6 +601,7 @@
   }
   .assign-export-btn:hover{ color: var(--ink); border-color: var(--ink); }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="toast-container" id="toastContainer"></div>
@@ -743,6 +744,46 @@
   const submitBtn = $("submitBtn");
   const formError = $("formError");
   const slipNum = $("slipNum");
+
+  // Direct-to-Supabase client for watching an in-flight search's progress
+  // and reading its final results -- deliberately NOT going through Render
+  // for this. Render only handles the one-time /api/submit call (it needs
+  // the signed-in user's session to gate credits and holds the internal
+  // key to trigger n8n); everything else about a search's live state lives
+  // in Supabase (search_requests/candidates, both anon-readable) and is
+  // cheap and safe to poll directly from the browser with the anon key,
+  // which is designed to be public and is the only thing exposed here.
+  const sb = window.supabase.createClient(
+    "https://ewbpejxknkagwxhceavx.supabase.co",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV3YnBlanhrbmthZ3d4aGNlYXZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3MzAzNzQsImV4cCI6MjEwMjMwNjM3NH0.Ad9tIkIUvMMGSntr8WazWaJ2NhfgAXWjWrcKGx-gZaE"
+  );
+
+  // Mirrors server.js's mapCandidateRow() -- same snake_case Supabase
+  // columns, same output shape the candidate cards already expect.
+  function mapCandidateRowClient(c){
+    return {
+      name: c.name || "", headline: c.headline || "", location: c.location || "",
+      current_role: c.current_title || "", current_company: c.current_company || "",
+      public_profile_url: c.public_profile_url || "", talent_profile_url: c.talent_profile_url || "",
+      network_distance: c.network_distance || "",
+      fit_score: c.fit_score === null || c.fit_score === undefined ? "" : c.fit_score,
+      ai_summary: c.ai_summary || "", matched_signals: c.matched_signals || "", gaps: c.gaps || "",
+      email: c.email || "", email_status: c.email_status || "", sourced_at: c.sourced_at || "",
+      recruitcrm_slug: c.recruitcrm_slug || "", assigned_job: c.assigned_job || "", assigned_at: c.assigned_at || "",
+      skills: c.skills || [], seniority: c.seniority || "", industry: c.industry || "",
+      connections_count: c.connections_count ?? null, profile_picture_url: c.profile_picture_url || "",
+      certifications: c.certifications || null, projects: c.projects || null, languages: c.languages || null,
+      employment_history: c.employment_history || null, organization_name: c.organization_name || "",
+      organization_industry: c.organization_industry || "", organization_employee_count: c.organization_employee_count ?? null,
+      organization_website: c.organization_website || "", organization_linkedin_url: c.organization_linkedin_url || "",
+      twitter_url: c.twitter_url || "", github_url: c.github_url || ""
+    };
+  }
+
+  // Fetched once at page load (not polled) -- needed to scope the
+  // direct-Supabase progress watch to this user's own search only.
+  let currentUserEmail = null;
+  fetch("/api/auth/session").then(r => r.json()).then(d => { currentUserEmail = d.email || null; }).catch(() => {});
 
   let runCount = 0;
   let linesEl, dotEl;
@@ -1288,35 +1329,10 @@
     board.appendChild(wrap);
   }
 
-  // Used when n8n's own execution record can't be trusted -- either the
-  // worker crashed mid-run (its runData becomes synthetic recovery
-  // placeholders, not real candidate data) or find-execution never located
-  // the run at all within its polling window. search_requests/candidates
-  // land in Supabase independently of n8n's own execution record surviving,
-  // so this checks there directly before telling the user the run failed.
-  async function tryResultsFallback(since){
-    try{
-      const res = await fetch(`/api/results-fallback?since=${encodeURIComponent(since)}`);
-      const json = await res.json();
-      if(!res.ok || json.error || !json.found) return false;
-      ledgerLine("Found it — your candidates were saved before the interruption.", "ok");
-      ledgerLine("Done", "ok");
-      setStatus("done", "Complete");
-      setProgressDone(false);
-      renderResults(json.candidates, null, json.totalFoundOnLinkedIn);
-      loadHistory();
-      loadCredits();
-      return true;
-    } catch(err){
-      return false;
-    }
-  }
-
   async function runSearch(formData){
     renderLedgerShell();
     ledgerLine("Request received", "ok");
 
-    let executionId;
     let requestId;
     let submittedAt;
     try{
@@ -1333,31 +1349,7 @@
       }
       requestId = submitJson.requestId;
       submittedAt = submitJson.submittedAt;
-
-      // Poll for the execution id ourselves, one short request at a time —
-      // deliberately not a single long-blocking call, since a big batch can
-      // now take several minutes and no individual request should have to
-      // survive that whole span.
-      ledgerLine("Waiting for n8n to pick it up…");
-      const findMaxAttempts = 60; // up to ~3 min at 3s
-      for(let attempt = 0; attempt < findMaxAttempts && !executionId; attempt++){
-        await new Promise(r => setTimeout(r, 3000));
-        try{
-          const findRes = await fetch(`/api/find-execution?since=${encodeURIComponent(submittedAt)}`);
-          const findJson = await findRes.json();
-          if(findJson.executionId) executionId = findJson.executionId;
-        } catch(err){ /* transient, keep polling */ }
-      }
-
-      if(!executionId){
-        ledgerLine("n8n hasn't listed the execution yet — checking whether your candidates already saved…");
-        if(await tryResultsFallback(submittedAt)) return;
-        ledgerLine("The workflow started fine but is taking a while for n8n to list — check the History panel in a bit, or the Candidates sheet / RecruitCRM directly.", "err");
-        setStatus("err", "Unconfirmed");
-        setProgressDone(true);
-        return;
-      }
-      ledgerLine(`Running (#${executionId})`, "ok");
+      ledgerLine("Workflow triggered", "ok");
     } catch(err){
       ledgerLine("Could not start the workflow: " + err.message, "err");
       setStatus("err", "Failed to start");
@@ -1367,84 +1359,93 @@
       return;
     }
 
-    ledgerLine("Searching LinkedIn, scoring fits…");
-    let finalStatus = null;
-    let progressLine = null;
-    let totalFoundOnLinkedIn = null;
-    const maxAttempts = 54; // ~4.5 min at 5s -- server-side caches the heavy
-    // n8n payload for 8s regardless, so polling faster than that just adds
-    // load without adding freshness.
-    for(let attempt = 0; attempt < maxAttempts; attempt++){
-      await new Promise(r => setTimeout(r, 5000));
+    // From here on, everything is watched by querying Supabase directly
+    // from the browser (search_requests + candidates, both anon-readable) --
+    // deliberately not Render/n8n. Render already did its one necessary job
+    // (gating credits, triggering the webhook); polling n8n's own execution
+    // API for the whole multi-minute run duration was what overloaded
+    // Render's memory limit. Supabase absorbs polling load fine and this
+    // also means an n8n-side crash no longer has any way to make the UI
+    // show a false failure -- the UI just watches what's actually saved.
+    ledgerLine("Waiting for the search to register…");
+    let searchRequestId = null;
+    const findMaxAttempts = 40; // up to ~2 min at 3s
+    for(let attempt = 0; attempt < findMaxAttempts && !searchRequestId; attempt++){
+      await new Promise(r => setTimeout(r, 3000));
       try{
-        const statusRes = await fetch(`/api/status/${executionId}`);
-        const statusJson = await statusRes.json();
-
-        if(statusJson.totalFoundOnLinkedIn) totalFoundOnLinkedIn = statusJson.totalFoundOnLinkedIn;
-
-        if(statusJson.totalCandidates){
-          const foundText = totalFoundOnLinkedIn ? ` (${totalFoundOnLinkedIn} total found on LinkedIn Recruiter)` : "";
-          const processed = statusJson.processedCandidates || 0;
-          const text = `Scored & filed ${processed} of ${statusJson.totalCandidates} candidates…${foundText}`;
-          if(progressLine){
-            progressLine.querySelector(".m").textContent = text;
-          } else {
-            progressLine = ledgerLine(text);
-          }
-          setProgressDeterminate((processed / statusJson.totalCandidates) * 100, `${processed} / ${statusJson.totalCandidates} candidates scored`);
-        }
-
-        if(statusJson.status === "success" || statusJson.finished === true){ finalStatus = "success"; break; }
-        if(statusJson.status === "crashed"){ finalStatus = "crashed"; break; }
-        if(statusJson.status === "error"){ finalStatus = "error"; break; }
+        const { data } = await sb.from("search_requests")
+          .select("id")
+          .eq("requester_email", currentUserEmail || "")
+          .gte("submitted_at", submittedAt)
+          .order("submitted_at", { ascending: false })
+          .limit(1);
+        if(data && data.length) searchRequestId = data[0].id;
       } catch(err){ /* transient, keep polling */ }
     }
 
-    if(finalStatus === "crashed"){
-      // n8n's worker died mid-run -- its own execution data is now just a
-      // synthetic recovery placeholder, not real output. That doesn't mean
-      // the run actually failed: writes to Supabase/RecruitCRM happen well
-      // before the workflow's final nodes, so candidates are often already
-      // saved. Check there directly before telling the user it failed.
-      ledgerLine("n8n's connection dropped mid-run — checking whether your candidates already saved…");
-      if(await tryResultsFallback(submittedAt)) return;
-      ledgerLine("Workflow connection was interrupted and no saved candidates were found yet — check RecruitCRM or try again in a minute.", "err");
-      setStatus("err", "Interrupted");
+    if(!searchRequestId){
+      ledgerLine("Still waiting for the search to register — check RecruitCRM or the Sourcing history panel directly.", "err");
+      setStatus("err", "Unconfirmed");
       setProgressDone(true);
+      loadCredits();
       return;
     }
-    if(finalStatus === "error"){
-      ledgerLine("Workflow reported an error.", "err");
-      setStatus("err", "Failed");
-      setProgressDone(true);
-      return;
-    }
-    if(finalStatus !== "success"){
-      ledgerLine("Still running after several minutes — check RecruitCRM / the Candidates sheet directly.", "err");
-      setStatus("err", "Timed out watching status");
-      setProgressDone(true);
-      return;
+    ledgerLine("Registered — searching LinkedIn, scoring fits…", "ok");
+
+    let progressLine = null;
+    let completedRow = null;
+    const maxAttempts = 60; // up to ~5 min at 5s
+    for(let attempt = 0; attempt < maxAttempts; attempt++){
+      await new Promise(r => setTimeout(r, 5000));
+      try{
+        const [{ data: reqRow }, { count }] = await Promise.all([
+          sb.from("search_requests").select("completed_at, total_found_on_linkedin").eq("id", searchRequestId).limit(1),
+          sb.from("candidates").select("id", { count: "exact", head: true }).eq("search_request_id", searchRequestId)
+        ]);
+        const processed = count || 0;
+        const totalFoundOnLinkedIn = reqRow && reqRow[0] && reqRow[0].total_found_on_linkedin;
+        const foundText = totalFoundOnLinkedIn ? ` (${totalFoundOnLinkedIn} total found on LinkedIn Recruiter)` : "";
+        const text = `${processed} candidate${processed === 1 ? "" : "s"} saved so far…${foundText}`;
+        if(progressLine){
+          progressLine.querySelector(".m").textContent = text;
+        } else {
+          progressLine = ledgerLine(text);
+        }
+
+        if(reqRow && reqRow[0] && reqRow[0].completed_at){ completedRow = reqRow[0]; break; }
+      } catch(err){ /* transient, keep polling */ }
     }
 
-    ledgerLine("Scored & saved to sheet", "ok");
-    ledgerLine("Loading results…");
+    // Even without a completion marker (timeout, or an older workflow
+    // version that hasn't picked up the new final node yet), whatever
+    // candidates are already in Supabase are real and worth showing —
+    // never a hard "failed" when there's actual saved data.
+    ledgerLine(completedRow ? "Done" : "Still processing — showing what's saved so far", "ok");
 
     try{
-      const resultsUrl = requestId ? `/api/results/${executionId}?requestId=${encodeURIComponent(requestId)}` : `/api/results/${executionId}`;
-      const resultsRes = await fetch(resultsUrl);
-      const resultsJson = await resultsRes.json();
-      showRaw(resultsJson);
-      if(!resultsRes.ok || resultsJson.error) throw new Error(resultsJson.error || "Results fetch failed.");
-      ledgerLine("Done", "ok");
-      setStatus("done", "Complete");
+      const { data: candidateRows, error } = await sb.rpc("get_candidates_for_search", { p_search_request_id: searchRequestId });
+      if(error) throw new Error(error.message);
+      const candidates = (candidateRows || []).map(mapCandidateRowClient);
+      const totalFoundOnLinkedIn = completedRow ? completedRow.total_found_on_linkedin : null;
+
+      showRaw({ candidates, totalFoundOnLinkedIn, completed: !!completedRow });
+      setStatus("done", completedRow ? "Complete" : "Partial");
       setProgressDone(false);
-      renderResults(resultsJson.candidates, resultsJson.summary, resultsJson.totalFoundOnLinkedIn);
+      renderResults(candidates, null, totalFoundOnLinkedIn);
       loadHistory();
+
+      // One single, one-time authenticated call to reconcile unused email
+      // credits and record team candidate counts -- not a poll, fires once
+      // right here regardless of whether the run fully completed.
+      fetch("/api/reconcile-credits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, searchRequestId })
+      }).catch(() => {}).finally(() => loadCredits());
     } catch(err){
       ledgerLine("Run finished, but results couldn't be loaded: " + err.message, "err");
       setStatus("err", "Results unavailable");
       setProgressDone(true);
-    } finally {
       loadCredits();
     }
   }
